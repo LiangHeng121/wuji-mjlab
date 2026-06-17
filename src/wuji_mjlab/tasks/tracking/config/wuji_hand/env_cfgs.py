@@ -19,17 +19,23 @@ _MOTION_FILE = (
 )
 _OBJECT_NAME = "cubesmall"  # real GRAB mesh (matches the retargeted reference)
 _OBJ_LATENT_FILE = "/home/liangh/DexTrack/assets/obj_type_to_obj_feat.npy"
+_SEQ = "ori_grab_s2_cubesmall_inspect_1"
+# B2 contact guidance data (true-flag + nearest in-slice vertex) for cgsmooth.
+_CONTACT_FILE = (
+  "/home/liangh/DexTrack/isaacgymenvs/data/GRAB_Tracking_PK_WUJI_FPOS_v1/"
+  f"contact_grab2/{_SEQ}_contact.npy"
+)
 
 
 def wuji_hand_cubesmall_tracking_env_cfg(
   play: bool = False, num_envs: int = 4096,
   action_mode: str = "offset", obs_mode: str = "full",
   scale_rewards_by_dt: bool = False, finger_kp_scale: float = 8.0,
-  obj_friction: float | None = None,
+  obj_friction: float | None = None, reward_mode: str = "pinall3",
 ) -> ManagerBasedRlEnvCfg:
   cfg = make_tracking_env_cfg(
     num_envs=num_envs, action_mode=action_mode, obs_mode=obs_mode,
-    scale_rewards_by_dt=scale_rewards_by_dt,
+    scale_rewards_by_dt=scale_rewards_by_dt, reward_mode=reward_mode,
   )
 
   cfg.scene.entities = {
@@ -40,6 +46,8 @@ def wuji_hand_cubesmall_tracking_env_cfg(
   }
   cfg.commands["motion"].motion_file = _MOTION_FILE
   cfg.commands["motion"].obj_latent_file = _OBJ_LATENT_FILE
+  if reward_mode == "cgsmooth_b2_softclip":  # only this mode needs contact data
+    cfg.commands["motion"].contact_file = _CONTACT_FILE
   cfg.viewer.body_name = "right_palm_link"
 
   if play:

@@ -55,6 +55,15 @@ class KinematicsBiasAction(JointPositionAction):
       (self.num_envs, len(self._target_ids)), device=env.device
     )
 
+    # HAND_EMA (cgsmooth): low-pass the FINGER target dims (anti-jitter, a filter
+    # not a penalty -> doesn't fight the grasp). target = (1-a)*target + a*prev.
+    self._hand_ema_coef = cfg.hand_ema_coef
+    self._finger_mask = torch.tensor(
+      [not n.startswith("WRJ0") for n in names], device=env.device
+    )  # (n,) True for the 20 finger DOF
+    self._prev_target = torch.zeros_like(self._accum_delta)  # (E,n) smoothed target
+    self._ema_seeded = torch.zeros(self.num_envs, dtype=torch.bool, device=env.device)
+
   def process_actions(self, actions: torch.Tensor) -> None:
     self._raw_actions[:] = actions
     clamped = torch.clamp(actions, -1.0, 1.0)
@@ -69,6 +78,18 @@ class KinematicsBiasAction(JointPositionAction):
     else:  # "offset"
       target = ref + clamped * self._action_scale
 
+    # HAND_EMA: low-pass only the finger target dims. Freshly-reset envs seed
+    # prev=target (no smoothing on the first step after reset).
+    if self._hand_ema_coef > 0.0:
+      a = self._hand_ema_coef
+      unseeded = ~self._ema_seeded
+      if unseeded.any():
+        self._prev_target[unseeded] = target[unseeded]
+        self._ema_seeded[unseeded] = True
+      smoothed = (1.0 - a) * target + a * self._prev_target
+      target = torch.where(self._finger_mask.unsqueeze(0), smoothed, target)
+      self._prev_target = target.clone()
+
     self._processed_actions = torch.clamp(
       target, self._lower_limits, self._upper_limits
     )
@@ -80,6 +101,7 @@ class KinematicsBiasAction(JointPositionAction):
   def reset(self, env_ids: torch.Tensor) -> None:
     super().reset(env_ids)
     self._accum_delta[env_ids] = 0.0  # clear accumulated residual on episode reset
+    self._ema_seeded[env_ids] = False  # re-seed EMA from next step's target
 
 
 @dataclass(kw_only=True)
@@ -92,6 +114,8 @@ class KinematicsBiasActionCfg(JointPositionActionCfg):
   glb_trans_vel_scale: float = 0.5
   glb_rot_vel_scale: float = 0.5
   dof_speed_scale: float = 20.0
+  # HAND_EMA (cgsmooth): finger-target low-pass coef (0 = off, 0.4 = DexTrack).
+  hand_ema_coef: float = 0.0
 
   def build(self, env) -> KinematicsBiasAction:
     return KinematicsBiasAction(self, env)

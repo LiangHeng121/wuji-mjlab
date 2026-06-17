@@ -21,13 +21,16 @@ from __future__ import annotations
 
 import torch
 
-# pinall3: FIX_FINGER5 -> all 5 fingertips (th, ff, mf, rf, lf = finger1..5).
+from mjlab.utils.lab_api.math import quat_apply
+
+# FIX_FINGER5 -> all 5 fingertips (th, ff, mf, rf, lf = finger1..5).
 _TIP_SITES = tuple(f"right_finger{i}_tip" for i in range(1, 6))
 _PALM_BODY = "right_palm_link"
-_NUM_FINGERS = 5
+_NUM_FINGERS = 5  # wuji has 5 fingers -> thresholds use x5 in BOTH original & pinall3
 _FINGER_DIST_CLAMP = 0.6 * _NUM_FINGERS  # 3.0 m
 _FINGER_DIST_THRES = 0.12 * _NUM_FINGERS  # 0.60 m
-_PALM_GRIP_THRES = 0.22  # m (RELAX_PALM)
+# grip thres: original 0.12, pinall3 (RELAX_PALM) 0.22. n_finger_sum: original sums
+# only th,ff,mf,rf (4); pinall3 (FIX_FINGER5) sums all 5. (thresholds stay x5.)
 _PALM_DIST_CLAMP = 0.5  # m
 
 
@@ -51,16 +54,21 @@ def _hand_points(env, command_name: str):
   return cmd, robot, sim_tips, sim_palm, obj_pos
 
 
-def _grasp_geometry(env, command_name: str):
-  """finger_dist, palm_dist, grasp flag, goal_dist."""
+def _grasp_geometry(env, command_name: str, grip_thres: float, n_finger_sum: int):
+  """finger_dist, palm_dist, grasp flag, goal_dist.
+
+  grip_thres: palm-grip threshold (original 0.12, pinall3/RELAX_PALM 0.22).
+  n_finger_sum: # fingertips summed into finger_dist (original 4, pinall3 5).
+  """
   cmd, _, sim_tips, sim_palm, obj_pos = _hand_points(env, command_name)
-  finger_dist = torch.norm(obj_pos.unsqueeze(1) - sim_tips, p=2, dim=-1).sum(dim=-1)
+  tips = sim_tips[:, :n_finger_sum]  # (E, n, 3)
+  finger_dist = torch.norm(obj_pos.unsqueeze(1) - tips, p=2, dim=-1).sum(dim=-1)
   finger_dist = finger_dist.clamp(max=_FINGER_DIST_CLAMP)
   palm_dist = torch.norm(obj_pos - sim_palm, p=2, dim=-1).clamp(max=_PALM_DIST_CLAMP)
   finger_dist = torch.where(
-    palm_dist <= _PALM_GRIP_THRES, finger_dist, torch.zeros_like(finger_dist)
+    palm_dist <= grip_thres, finger_dist, torch.zeros_like(finger_dist)
   )
-  flag = (finger_dist <= _FINGER_DIST_THRES).int() + (palm_dist <= _PALM_GRIP_THRES).int()
+  flag = (finger_dist <= _FINGER_DIST_THRES).int() + (palm_dist <= grip_thres).int()
   goal_dist = torch.norm(cmd.ref_obj_pos - obj_pos, p=2, dim=-1)
   return finger_dist, palm_dist, flag, goal_dist
 
@@ -80,22 +88,27 @@ def hand_pose_tracking(
 
 
 def finger_object_distance(
-  env, command_name: str = "motion", palm_dist_rew_w: float = 0.0
+  env, command_name: str = "motion", palm_dist_rew_w: float = 0.0,
+  grip_thres: float = 0.22, n_finger_sum: int = 5,
 ) -> torch.Tensor:
   """-(finger_dist + palm_dist_rew_w*palm_dist); RELAX_PALM -> palm_dist_rew_w=0."""
-  finger_dist, palm_dist, _, _ = _grasp_geometry(env, command_name)
+  finger_dist, palm_dist, _, _ = _grasp_geometry(env, command_name, grip_thres, n_finger_sum)
   return -(finger_dist + palm_dist_rew_w * palm_dist)
 
 
-def object_pos_tracking(env, command_name: str = "motion") -> torch.Tensor:
+def object_pos_tracking(
+  env, command_name: str = "motion", grip_thres: float = 0.22, n_finger_sum: int = 5
+) -> torch.Tensor:
   """-2*goal_dist, only when grasping (flag==2)."""
-  _, _, flag, goal_dist = _grasp_geometry(env, command_name)
+  _, _, flag, goal_dist = _grasp_geometry(env, command_name, grip_thres, n_finger_sum)
   return torch.where(flag == 2, -2.0 * goal_dist, torch.zeros_like(goal_dist))
 
 
-def object_inplace_bonus(env, command_name: str = "motion") -> torch.Tensor:
+def object_inplace_bonus(
+  env, command_name: str = "motion", grip_thres: float = 0.22, n_finger_sum: int = 5
+) -> torch.Tensor:
   """+1/(1+10*goal_dist) if goal_dist<=0.05 and grasping (flag==2)."""
-  _, _, flag, goal_dist = _grasp_geometry(env, command_name)
+  _, _, flag, goal_dist = _grasp_geometry(env, command_name, grip_thres, n_finger_sum)
   b = torch.where(
     goal_dist <= 0.05, 1.0 / (1.0 + 10.0 * goal_dist), torch.zeros_like(goal_dist)
   )
@@ -112,3 +125,52 @@ def palm_pos_tracking(env, command_name: str = "motion") -> torch.Tensor:
   """PALM_POS_REW: -||sim_palm - ref_palm|| (always on); weight=PALM_POS_COEF."""
   cmd, _, _, sim_palm, _ = _hand_points(env, command_name)
   return -torch.norm(sim_palm - cmd.ref_palm_pos, p=2, dim=-1)
+
+
+# ----- cgsmooth_b2_softclip patches (on top of pinall3) ---------------------
+
+
+def contact_guide(env, command_name: str = "motion", beta: float = 8.0) -> torch.Tensor:
+  """B2 contact guidance: +mean over contact fingers of exp(-beta*d), where d is
+  the sim fingertip -> reference contact point (object-local point transformed by
+  the LIVE object pose). Gated per finger by the true contact flag. weight=CONTACT_COEF.
+
+    cg_value = sum_f flag_f * exp(-beta * d_f) / (sum_f flag_f + 1e-6)
+  """
+  cmd, _, sim_tips, _, obj_pos = _hand_points(env, command_name)
+  obj = env.scene[cmd.cfg.object_entity_name]
+  obj_quat = obj.data.root_link_quat_w  # (E,4) wxyz
+  local = cmd.ref_contact_local  # (E,5,3) object-local
+  # world contact point = obj_pos + R(obj_quat) @ local, per finger.
+  q = obj_quat.unsqueeze(1).expand(-1, 5, -1).reshape(-1, 4)
+  world = quat_apply(q, local.reshape(-1, 3)).reshape(-1, 5, 3) + obj_pos.unsqueeze(1)
+  d = torch.norm(sim_tips - world, p=2, dim=-1)  # (E,5)
+  flag = cmd.ref_contact_flag  # (E,5)
+  v = torch.exp(-beta * d)
+  cg = (flag * v).sum(dim=-1)
+  fs = flag.sum(dim=-1)
+  return cg / (fs + 1e-6)
+
+
+def soft_joint_limit(env, command_name: str = "motion") -> torch.Tensor:
+  """SOFT_LIMIT: -sum_finger [relu(lo-q)^2 + relu(q-hi)^2] over the 20 finger joints
+  (skip the 6 base WRJ0* DOF). Anti reverse-joint. weight=SOFT_LIMIT_COEF.
+  """
+  cmd = env.command_manager.get_term(command_name)
+  robot = env.scene[cmd.cfg.hand_entity_name]
+  q = robot.data.joint_pos[:, 6:]  # finger joints (q26 order: 6 base first)
+  lim = robot.data.soft_joint_pos_limits[:, 6:]  # (E, nfinger, 2)
+  below = torch.clamp(lim[..., 0] - q, min=0.0)
+  above = torch.clamp(q - lim[..., 1], min=0.0)
+  return -(below * below + above * above).sum(dim=-1)
+
+
+def action_rate_l2(env, command_name: str = "motion") -> torch.Tensor:
+  """ACTION_RATE: -[||a_t - a_{t-1}||^2 + ||a_t - 2a_{t-1} + a_{t-2}||^2] (1st+2nd order
+  residual rate, penalises twitchy actions). weight=ACTION_RATE_COEF.
+  """
+  am = env.action_manager
+  a, p, pp = am.action, am.prev_action, am.prev_prev_action
+  first = torch.sum((a - p) ** 2, dim=-1)
+  second = torch.sum((a - 2.0 * p + pp) ** 2, dim=-1)
+  return -(first + second)

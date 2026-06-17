@@ -91,6 +91,22 @@ class HandObjectMotionCommand(CommandTerm):
     else:
       self._obj_latent = None
 
+    # B2 contact guidance (cgsmooth_b2_softclip): per-frame contact flag (T,5) +
+    # contact point in OBJECT-LOCAL frame (T,5,3), order th,ff,mf,rf,lf. Generated
+    # by wuji_pipeline/generate_contact_guidance_grab2.py ("grab_truth_nearest":
+    # GRAB true contact flag + nearest in-slice vertex to the wuji fingertip).
+    if cfg.contact_file:
+      cd = np.load(cfg.contact_file, allow_pickle=True).item()
+      self._contact_flag = torch.tensor(
+        np.asarray(cd["contact_flag"], dtype=np.float32), device=self.device
+      )  # (T,5)
+      self._contact_local = torch.tensor(
+        np.asarray(cd["contact_pos_local"], dtype=np.float32), device=self.device
+      )  # (T,5,3) object-local
+    else:
+      self._contact_flag = None
+      self._contact_local = None
+
     self.time_steps = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
 
     self.metrics["error_joint_pos"] = torch.zeros(self.num_envs, device=self.device)
@@ -130,6 +146,20 @@ class HandObjectMotionCommand(CommandTerm):
   @property
   def obj_latent(self) -> torch.Tensor:
     return self._obj_latent.unsqueeze(0).expand(self.num_envs, -1)
+
+  @property
+  def ref_contact_flag(self) -> torch.Tensor:
+    # (E,5) contact flag at current frame; order th,ff,mf,rf,lf.
+    return self._contact_flag[self.time_steps]
+
+  @property
+  def ref_contact_local(self) -> torch.Tensor:
+    # (E,5,3) contact point in object-local frame at current frame.
+    return self._contact_local[self.time_steps]
+
+  @property
+  def has_contact(self) -> bool:
+    return self._contact_flag is not None
 
   @property
   def command(self) -> torch.Tensor:
@@ -181,6 +211,7 @@ class HandObjectMotionCommandCfg(CommandTermCfg):
   hand_entity_name: str = "robot"
   object_entity_name: str = "object"
   obj_latent_file: str = ""  # obj_type_to_obj_feat.npy (DexTrack w_obj_latent_features)
+  contact_file: str = ""  # contact_grab2/<seq>_contact.npy (B2 contact guidance)
 
   def build(self, env) -> HandObjectMotionCommand:
     return HandObjectMotionCommand(self, env)

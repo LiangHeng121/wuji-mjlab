@@ -32,7 +32,7 @@ from wuji_mjlab.tasks.tracking.mdp.commands import HandObjectMotionCommandCfg
 
 def make_tracking_env_cfg(
   num_envs: int = 4096, action_mode: str = "offset", obs_mode: str = "full",
-  scale_rewards_by_dt: bool = False,
+  scale_rewards_by_dt: bool = False, reward_mode: str = "pinall3",
 ) -> ManagerBasedRlEnvCfg:
   """Create the base hand+object tracking config.
 
@@ -43,6 +43,13 @@ def make_tracking_env_cfg(
   scale_rewards_by_dt: False (default) matches DexTrack/rl_games (no dt scaling ->
     episode returns ~hundreds). True is the original mjlab default (dt-scaled ->
     single-digit returns; the first success used True).
+  reward_mode: which DexTrack reward lineage to use:
+    - "original": base only (hand_pose 0.6/0.1/0.1, finger/palm-obj dist with
+      palm_dist_rew_w=2.0 + grip 0.12 + 4 fingers, gated obj pos + in-place bonus).
+    - "pinall3" (default): base + RELAX_PALM (palm_dist_rew_w 0, grip 0.22) +
+      FIX_FINGER5 (5 fingers) + FINGER_POS_REW(1.0) + PALM_POS_REW(1.0).
+    - "cgsmooth_b2_softclip": pinall3 + contact_guide(B2, beta=8) + HAND_EMA(0.4,
+      in the action) + action_rate(0.0005) + soft_joint_limit(0.5).
   """
 
   ##
@@ -105,6 +112,9 @@ def make_tracking_env_cfg(
   # Actions
   ##
 
+  # HAND_EMA finger-target low-pass is part of the cgsmooth patch only.
+  hand_ema_coef = 0.4 if reward_mode == "cgsmooth_b2_softclip" else 0.0
+
   actions: dict[str, ActionTermCfg] = {
     "joint_pos": KinematicsBiasActionCfg(
       entity_name="robot",
@@ -119,6 +129,7 @@ def make_tracking_env_cfg(
       glb_trans_vel_scale=0.5,
       glb_rot_vel_scale=0.5,
       dof_speed_scale=5.0,
+      hand_ema_coef=hand_ema_coef,
       command_name="motion",
     )
   }
@@ -140,8 +151,14 @@ def make_tracking_env_cfg(
   # Rewards
   ##
 
-  # Faithful port of DexTrack's base reward (no pinall3/cgsmooth/B2/softclip/idle
-  # patches). Weights = DexTrack coefs; funcs return the (negative) penalties.
+  # DexTrack reward lineage, selected by reward_mode (weights = DexTrack coefs;
+  # funcs return the signed reward so weights are positive coef magnitudes).
+  if reward_mode == "original":
+    # base: tighter palm grip (0.12), 4-finger sum, palm-distance penalty ON.
+    grip, n_sum, palm_w = 0.12, 4, 2.0
+  else:  # pinall3 and cgsmooth_b2_softclip share the RELAX_PALM/FIX_FINGER5 base.
+    grip, n_sum, palm_w = 0.22, 5, 0.0
+
   rewards: dict[str, RewardTermCfg] = {
     "hand_pose_tracking": RewardTermCfg(  # rew_delta_hand_pose_coef = 0.5
       func=mdp.hand_pose_tracking,
@@ -152,29 +169,40 @@ def make_tracking_env_cfg(
     "finger_object_distance": RewardTermCfg(  # rew_finger_obj_dist_coef = 0.3
       func=mdp.finger_object_distance,
       weight=0.3,
-      params={"command_name": "motion", "palm_dist_rew_w": 0.0},  # RELAX_PALM
+      params={"command_name": "motion", "palm_dist_rew_w": palm_w,
+              "grip_thres": grip, "n_finger_sum": n_sum},
     ),
     "object_pos_tracking": RewardTermCfg(  # goal_hand_rew, gated by grasp flag
       func=mdp.object_pos_tracking,
       weight=1.0,
-      params={"command_name": "motion"},
+      params={"command_name": "motion", "grip_thres": grip, "n_finger_sum": n_sum},
     ),
     "object_inplace_bonus": RewardTermCfg(  # in-place bonus, gated by grasp flag
       func=mdp.object_inplace_bonus,
       weight=1.0,
-      params={"command_name": "motion"},
-    ),
-    "finger_pos_tracking": RewardTermCfg(  # FINGER_POS_REW, FINGER_POS_COEF=1.0
-      func=mdp.finger_pos_tracking,
-      weight=1.0,
-      params={"command_name": "motion"},
-    ),
-    "palm_pos_tracking": RewardTermCfg(  # PALM_POS_REW, PALM_POS_COEF=1.0
-      func=mdp.palm_pos_tracking,
-      weight=1.0,
-      params={"command_name": "motion"},
+      params={"command_name": "motion", "grip_thres": grip, "n_finger_sum": n_sum},
     ),
   }
+
+  if reward_mode != "original":  # pinall3 dense fingertip/palm tracking terms
+    rewards["finger_pos_tracking"] = RewardTermCfg(  # FINGER_POS_COEF=1.0
+      func=mdp.finger_pos_tracking, weight=1.0, params={"command_name": "motion"},
+    )
+    rewards["palm_pos_tracking"] = RewardTermCfg(  # PALM_POS_COEF=1.0
+      func=mdp.palm_pos_tracking, weight=1.0, params={"command_name": "motion"},
+    )
+
+  if reward_mode == "cgsmooth_b2_softclip":  # B2 contact + action-rate + soft-limit
+    rewards["contact_guide"] = RewardTermCfg(  # CONTACT_COEF=1.0, CONTACT_BETA=8
+      func=mdp.contact_guide, weight=1.0,
+      params={"command_name": "motion", "beta": 8.0},
+    )
+    rewards["action_rate"] = RewardTermCfg(  # ACTION_RATE_COEF=0.0005
+      func=mdp.action_rate_l2, weight=0.0005, params={"command_name": "motion"},
+    )
+    rewards["soft_joint_limit"] = RewardTermCfg(  # SOFT_LIMIT_COEF=0.5
+      func=mdp.soft_joint_limit, weight=0.5, params={"command_name": "motion"},
+    )
 
   ##
   # Terminations
