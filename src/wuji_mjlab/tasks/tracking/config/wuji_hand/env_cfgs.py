@@ -21,9 +21,9 @@ _OBJECT_NAME = "cubesmall"  # real GRAB mesh (matches the retargeted reference)
 
 
 def wuji_hand_cubesmall_tracking_env_cfg(
-  play: bool = False, num_envs: int = 4096
+  play: bool = False, num_envs: int = 4096, action_mode: str = "offset"
 ) -> ManagerBasedRlEnvCfg:
-  cfg = make_tracking_env_cfg(num_envs=num_envs)
+  cfg = make_tracking_env_cfg(num_envs=num_envs, action_mode=action_mode)
 
   cfg.scene.entities = {
     "robot": get_wuji_fly_hand_cfg(),

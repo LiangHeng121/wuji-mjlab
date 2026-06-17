@@ -30,8 +30,14 @@ from wuji_mjlab.tasks.tracking.mdp.actions import KinematicsBiasActionCfg
 from wuji_mjlab.tasks.tracking.mdp.commands import HandObjectMotionCommandCfg
 
 
-def make_tracking_env_cfg(num_envs: int = 4096) -> ManagerBasedRlEnvCfg:
-  """Create the base hand+object tracking config."""
+def make_tracking_env_cfg(
+  num_envs: int = 4096, action_mode: str = "offset"
+) -> ManagerBasedRlEnvCfg:
+  """Create the base hand+object tracking config.
+
+  action_mode: "offset" (uniform residual, action_scale 0.1 — current default) or
+  "wdelta" (DexTrack-exact accumulative per-group residual).
+  """
 
   ##
   # Observations
@@ -79,10 +85,14 @@ def make_tracking_env_cfg(num_envs: int = 4096) -> ManagerBasedRlEnvCfg:
     "joint_pos": KinematicsBiasActionCfg(
       entity_name="robot",
       actuator_names=(".*",),
-      # Small residual: the zero-residual reference already lifts the cube (with
-      # kp x8), so constrain the policy to small corrections around it instead of
-      # letting it drift off into a "track-but-don't-grip" local optimum.
+      mode=action_mode,
+      # offset mode: small residual — the zero-residual reference already lifts the
+      # cube (with kp x8), so constrain the policy to small corrections around it.
       action_scale=0.1,
+      # wdelta mode: DexTrack wuji per-group speed scales.
+      glb_trans_vel_scale=0.5,
+      glb_rot_vel_scale=0.5,
+      dof_speed_scale=20.0,
       command_name="motion",
     )
   }
