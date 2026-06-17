@@ -6,7 +6,10 @@ from mjlab.tasks.registry import register_mjlab_task
 
 from wuji_mjlab.rl.runner import WujiOnPolicyRunner
 
-from .env_cfgs import wuji_hand_cubesmall_tracking_env_cfg
+from .env_cfgs import (
+  wuji_hand_cubesmall_multi_tracking_env_cfg,
+  wuji_hand_cubesmall_tracking_env_cfg,
+)
 from .rsl_rl.ppo import wuji_hand_tracking_ppo_runner_cfg
 
 # DEFAULT: DexTrack-faithful — full obs + wdelta accumulative action (finger
@@ -72,5 +75,23 @@ for _rid, _rmode in (
       play=True, action_mode="wdelta", finger_kp_scale=1.0, reward_mode=_rmode),
     rl_cfg=wuji_hand_tracking_ppo_runner_cfg(
       run_name=f"Tracking_Cmp_{_rid}", max_iterations=10000),
+    runner_cls=WujiOnPolicyRunner,
+  )
+
+# ----- multi-sequence cubesmall generalist (all subjects, NO offhand) ----------
+# 3 reward configs again, for running on 3 GPUs in parallel. kp x1 + wdelta.
+for _rid, _rmode in (
+  ("Original", "original"),
+  ("Pinall3", "pinall3"),
+  ("CGSmooth", "cgsmooth_b2_softclip"),
+):
+  register_mjlab_task(
+    task_id=f"WujiHand_Tracking_CubesmallMulti_{_rid}",
+    env_cfg=wuji_hand_cubesmall_multi_tracking_env_cfg(
+      num_envs=4096, reward_mode=_rmode),
+    play_env_cfg=wuji_hand_cubesmall_multi_tracking_env_cfg(
+      play=True, reward_mode=_rmode),
+    rl_cfg=wuji_hand_tracking_ppo_runner_cfg(
+      run_name=f"Tracking_CubesmallMulti_{_rid}", max_iterations=10000),
     runner_cls=WujiOnPolicyRunner,
   )
