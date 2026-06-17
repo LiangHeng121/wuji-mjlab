@@ -8,8 +8,8 @@ from pathlib import Path
 
 from mjlab.envs import ManagerBasedRlEnvCfg
 
-from wuji_mjlab.assets.objects.inhand_object.object_cfg import get_inhand_object_cfg
 from wuji_mjlab.tasks.tracking.config.wuji_hand.robot import get_wuji_fly_hand_cfg
+from wuji_mjlab.tasks.tracking.grab_object_cfg import get_grab_object_cfg
 from wuji_mjlab.tasks.tracking.tracking_env_cfg import make_tracking_env_cfg
 
 # Single cubesmall reference (FPOS retarget, same data used on the Isaac Gym side).
@@ -17,7 +17,7 @@ _MOTION_FILE = (
   "/home/liangh/DexTrack/isaacgymenvs/data/GRAB_Tracking_PK_WUJI_FPOS_v1/"
   "data/wuji_passive_active_info_ori_grab_s2_cubesmall_inspect_1_nf_300.npy"
 )
-_CUBESMALL_EDGE_M = 0.05  # ~5 cm cube
+_OBJECT_NAME = "cubesmall"  # real GRAB mesh (matches the retargeted reference)
 
 
 def wuji_hand_cubesmall_tracking_env_cfg(
@@ -27,7 +27,7 @@ def wuji_hand_cubesmall_tracking_env_cfg(
 
   cfg.scene.entities = {
     "robot": get_wuji_fly_hand_cfg(),
-    "object": get_inhand_object_cfg(edge_m=_CUBESMALL_EDGE_M),
+    "object": get_grab_object_cfg(_OBJECT_NAME),
   }
   cfg.commands["motion"].motion_file = _MOTION_FILE
   cfg.viewer.body_name = "right_palm_link"

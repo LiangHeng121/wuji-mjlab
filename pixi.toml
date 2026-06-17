@@ -36,6 +36,7 @@ warp-lang = ">=1.12,<1.13"
 scipy = ">=1.15,<2"
 # pin <2: trimesh mesh.show() incompatible with pyglet 2.x (as of trimesh 4.12)
 pyglet = ">=1.5,<2"
+coacd = ">=1.0.11, <2"
 
 [tasks]
 train = { cmd = "python scripts/train/train_rsl_rl.py", description = "Train a task with rsl_rl (append --task and overrides)" }
