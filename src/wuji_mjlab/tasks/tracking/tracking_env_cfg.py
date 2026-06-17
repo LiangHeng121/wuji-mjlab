@@ -33,6 +33,7 @@ from wuji_mjlab.tasks.tracking.mdp.commands import HandObjectMotionCommandCfg
 def make_tracking_env_cfg(
   num_envs: int = 4096, action_mode: str = "offset", obs_mode: str = "full",
   scale_rewards_by_dt: bool = False, reward_mode: str = "pinall3",
+  nconmax: int = 96, njmax: int = 512,
 ) -> ManagerBasedRlEnvCfg:
   """Create the base hand+object tracking config.
 
@@ -244,12 +245,12 @@ def make_tracking_env_cfg(
       azimuth=130.0,
     ),
     sim=SimulationCfg(
-      # Per-env contact/constraint buffer caps. These dominate mujoco-warp
-      # memory; 200/800 was wildly over-provisioned (cut 22000-env VRAM ~2x).
-      # 128/640 leaves margin over a single-cube grasp (reorient, far more
-      # contact-heavy, uses 180) while fitting 22000 envs comfortably.
-      nconmax=96,
-      njmax=512,
+      # Per-env contact/constraint buffer caps -- these DOMINATE mujoco-warp VRAM
+      # (each njmax constraint row stores a full nv-wide Jacobian). A single-cube
+      # grasp uses very few (~24 efc), so 96/512 is heavily over-provisioned; with
+      # them cut, 40000 envs fit on one A100 (DexTrack ran 40000 single-GPU too).
+      nconmax=nconmax,
+      njmax=njmax,
       mujoco=MujocoCfg(
         timestep=0.0083,
         iterations=10,
