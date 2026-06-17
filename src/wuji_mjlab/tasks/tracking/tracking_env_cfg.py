@@ -31,19 +31,21 @@ from wuji_mjlab.tasks.tracking.mdp.commands import HandObjectMotionCommandCfg
 
 
 def make_tracking_env_cfg(
-  num_envs: int = 4096, action_mode: str = "offset"
+  num_envs: int = 4096, action_mode: str = "offset", obs_mode: str = "full"
 ) -> ManagerBasedRlEnvCfg:
   """Create the base hand+object tracking config.
 
-  action_mode: "offset" (uniform residual, action_scale 0.1 — current default) or
-  "wdelta" (DexTrack-exact accumulative per-group residual).
+  action_mode: "offset" (uniform residual, action_scale 0.1) or "wdelta"
+    (DexTrack-exact accumulative per-group residual).
+  obs_mode: "full" (default; faithful DexTrack pure_state_wref_wdelta obs, ~499-d
+    incl 256-d object latent) or "simple" (the 114-d set the first success used).
   """
 
   ##
   # Observations
   ##
 
-  def _obs_terms(noisy: bool) -> dict[str, ObservationTermCfg]:
+  def _simple_terms(noisy: bool) -> dict[str, ObservationTermCfg]:
     jp_noise = Unoise(n_min=-0.01, n_max=0.01) if noisy else None
     jv_noise = Unoise(n_min=-0.5, n_max=0.5) if noisy else None
     return {
@@ -64,16 +66,34 @@ def make_tracking_env_cfg(
       "actions": ObservationTermCfg(func=mdp.last_action),
     }
 
+  def _full_terms() -> dict[str, ObservationTermCfg]:
+    # Faithful DexTrack pure_state_wref_wdelta obs (see observations.py).
+    p = {"command_name": "motion"}
+    return {
+      "hand_qpos": ObservationTermCfg(func=mdp.ho_hand_qpos, params=p),
+      "hand_qvel": ObservationTermCfg(func=mdp.ho_hand_qvel, params=p),
+      "fingertips": ObservationTermCfg(func=mdp.ho_fingertip_state, params=p),
+      "palm": ObservationTermCfg(func=mdp.ho_palm_state, params=p),
+      "actions": ObservationTermCfg(func=mdp.last_action),
+      "object": ObservationTermCfg(func=mdp.ho_object_state, params=p),
+      "delta_qpos": ObservationTermCfg(func=mdp.ho_delta_qpos, params=p),
+      "next_ref_qpos": ObservationTermCfg(func=mdp.ho_next_ref_qpos, params=p),
+      "cumulative_delta": ObservationTermCfg(func=mdp.ho_cumulative_delta, params=p),
+      "obj_latent": ObservationTermCfg(func=mdp.ho_obj_latent, params=p),
+    }
+
+  if obs_mode == "simple":
+    policy_terms, critic_terms = _simple_terms(noisy=True), _simple_terms(noisy=False)
+  else:
+    policy_terms = critic_terms = _full_terms()
+
   observations = {
     "policy": ObservationGroupCfg(
-      terms=_obs_terms(noisy=True),
-      concatenate_terms=True,
-      enable_corruption=True,
+      terms=policy_terms, concatenate_terms=True,
+      enable_corruption=(obs_mode == "simple"),
     ),
     "critic": ObservationGroupCfg(
-      terms=_obs_terms(noisy=False),
-      concatenate_terms=True,
-      enable_corruption=False,
+      terms=critic_terms, concatenate_terms=True, enable_corruption=False,
     ),
   }
 

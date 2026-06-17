@@ -76,6 +76,21 @@ class HandObjectMotionCommand(CommandTerm):
       np.asarray(lk["right_palm_link"], dtype=np.float32), device=self.device
     )  # (T,3)
 
+    # Object latent feature (DexTrack w_obj_latent_features): precomputed 256-d
+    # per-sequence embedding. Constant for a single sequence.
+    if cfg.obj_latent_file:
+      import os
+      seq = os.path.basename(cfg.motion_file)
+      seq = seq.replace("wuji_passive_active_info_", "").replace("_nf_300.npy", "")
+      feat_dict = np.load(cfg.obj_latent_file, allow_pickle=True).item()
+      if seq not in feat_dict:
+        raise KeyError(f"object latent for '{seq}' not in {cfg.obj_latent_file}")
+      self._obj_latent = torch.tensor(
+        np.asarray(feat_dict[seq], dtype=np.float32), device=self.device
+      )  # (256,)
+    else:
+      self._obj_latent = None
+
     self.time_steps = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
 
     self.metrics["error_joint_pos"] = torch.zeros(self.num_envs, device=self.device)
@@ -105,6 +120,16 @@ class HandObjectMotionCommand(CommandTerm):
   @property
   def ref_palm_pos(self) -> torch.Tensor:
     return self._ref_palm_pos[self.time_steps]
+
+  @property
+  def next_ref_qpos(self) -> torch.Tensor:
+    # DexTrack uses progress_buf+1 as the obs goal (use_future_ref_as_obs_goal).
+    nxt = torch.clamp(self.time_steps + 1, max=self.time_step_total - 1)
+    return self._ref_qpos[nxt]
+
+  @property
+  def obj_latent(self) -> torch.Tensor:
+    return self._obj_latent.unsqueeze(0).expand(self.num_envs, -1)
 
   @property
   def command(self) -> torch.Tensor:
@@ -155,6 +180,7 @@ class HandObjectMotionCommandCfg(CommandTermCfg):
   motion_file: str = ""
   hand_entity_name: str = "robot"
   object_entity_name: str = "object"
+  obj_latent_file: str = ""  # obj_type_to_obj_feat.npy (DexTrack w_obj_latent_features)
 
   def build(self, env) -> HandObjectMotionCommand:
     return HandObjectMotionCommand(self, env)
