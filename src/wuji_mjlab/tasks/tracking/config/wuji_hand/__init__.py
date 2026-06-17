@@ -43,3 +43,15 @@ register_mjlab_task(
 )
 
 # (wdelta is now the default WujiHand_Tracking_Cubesmall above.)
+
+# Ablation: ORIGINAL vendor finger kp (x1). Open-loop can't lift (grip too weak),
+# but does the trained policy learn to compensate via the residual?
+register_mjlab_task(
+  task_id="WujiHand_Tracking_Cubesmall_OrigKp",
+  env_cfg=wuji_hand_cubesmall_tracking_env_cfg(
+    num_envs=4096, action_mode="wdelta", finger_kp_scale=1.0),
+  play_env_cfg=wuji_hand_cubesmall_tracking_env_cfg(
+    play=True, action_mode="wdelta", finger_kp_scale=1.0),
+  rl_cfg=wuji_hand_tracking_ppo_runner_cfg(run_name="Tracking_OrigKp", max_iterations=10000),
+  runner_cls=WujiOnPolicyRunner,
+)
