@@ -113,10 +113,12 @@ def make_tracking_env_cfg(
       # offset mode: small residual — the zero-residual reference already lifts the
       # cube (with kp x8), so constrain the policy to small corrections around it.
       action_scale=0.1,
-      # wdelta mode: DexTrack wuji per-group speed scales.
+      # wdelta mode: per-group speed scales. DexTrack wuji uses dof_speed_scale=20,
+      # but that gives finger residual ~+-0.66 rad/step -> too twitchy in MuJoCo
+      # (bang-bang actions, hand jitters). Reduced to 5 (~+-0.17 rad/step) to test.
       glb_trans_vel_scale=0.5,
       glb_rot_vel_scale=0.5,
-      dof_speed_scale=20.0,
+      dof_speed_scale=5.0,
       command_name="motion",
     )
   }
