@@ -110,10 +110,10 @@ def make_tracking_env_cfg(num_envs: int = 4096) -> ManagerBasedRlEnvCfg:
       params={"command_name": "motion",
               "trans_coef": 0.6, "rot_coef": 0.1, "finger_coef": 0.1},
     ),
-    "finger_object_distance": RewardTermCfg(  # rew_finger_obj_dist_coef = 0.5
+    "finger_object_distance": RewardTermCfg(  # rew_finger_obj_dist_coef = 0.3
       func=mdp.finger_object_distance,
-      weight=0.5,
-      params={"command_name": "motion", "palm_dist_rew_w": 2.0},
+      weight=0.3,
+      params={"command_name": "motion", "palm_dist_rew_w": 0.0},  # RELAX_PALM
     ),
     "object_pos_tracking": RewardTermCfg(  # goal_hand_rew, gated by grasp flag
       func=mdp.object_pos_tracking,
@@ -122,6 +122,16 @@ def make_tracking_env_cfg(num_envs: int = 4096) -> ManagerBasedRlEnvCfg:
     ),
     "object_inplace_bonus": RewardTermCfg(  # in-place bonus, gated by grasp flag
       func=mdp.object_inplace_bonus,
+      weight=1.0,
+      params={"command_name": "motion"},
+    ),
+    "finger_pos_tracking": RewardTermCfg(  # FINGER_POS_REW, FINGER_POS_COEF=1.0
+      func=mdp.finger_pos_tracking,
+      weight=1.0,
+      params={"command_name": "motion"},
+    ),
+    "palm_pos_tracking": RewardTermCfg(  # PALM_POS_REW, PALM_POS_COEF=1.0
+      func=mdp.palm_pos_tracking,
       weight=1.0,
       params={"command_name": "motion"},
     ),

@@ -64,6 +64,18 @@ class HandObjectMotionCommand(CommandTerm):
     self._ref_obj_quat = torch.tensor(oquat_wxyz, device=self.device)  # (T,4) wxyz
     self.time_step_total = int(self._ref_qpos.shape[0])
 
+    # Reference fingertip + palm world positions (FPOS data), for the pinall3
+    # FINGER_POS_REW / PALM_POS_REW terms. Verified to match sim FK <=2 mm.
+    lk = data["link_key_to_link_pos"]
+    lk = lk.item() if hasattr(lk, "item") and not isinstance(lk, dict) else lk
+    tips = np.stack(
+      [lk[f"right_finger{i}_tip_link"] for i in range(1, 6)], axis=1
+    ).astype(np.float32)  # (T,5,3) order th,ff,mf,rf,lf
+    self._ref_tip_pos = torch.tensor(tips, device=self.device)  # (T,5,3)
+    self._ref_palm_pos = torch.tensor(
+      np.asarray(lk["right_palm_link"], dtype=np.float32), device=self.device
+    )  # (T,3)
+
     self.time_steps = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
 
     self.metrics["error_joint_pos"] = torch.zeros(self.num_envs, device=self.device)
@@ -82,6 +94,15 @@ class HandObjectMotionCommand(CommandTerm):
   @property
   def ref_obj_quat(self) -> torch.Tensor:
     return self._ref_obj_quat[self.time_steps]
+
+  @property
+  def ref_fingertip_pos(self) -> torch.Tensor:
+    # (E,5,3) world frame (+ env origin); order th,ff,mf,rf,lf
+    return self._ref_tip_pos[self.time_steps] + self._env.scene.env_origins[:, None, :]
+
+  @property
+  def ref_palm_pos(self) -> torch.Tensor:
+    return self._ref_palm_pos[self.time_steps] + self._env.scene.env_origins
 
   @property
   def command(self) -> torch.Tensor:
