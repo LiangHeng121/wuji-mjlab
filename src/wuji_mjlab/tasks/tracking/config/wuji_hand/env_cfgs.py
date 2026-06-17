@@ -24,9 +24,11 @@ _OBJ_LATENT_FILE = "/home/liangh/DexTrack/assets/obj_type_to_obj_feat.npy"
 def wuji_hand_cubesmall_tracking_env_cfg(
   play: bool = False, num_envs: int = 4096,
   action_mode: str = "offset", obs_mode: str = "full",
+  scale_rewards_by_dt: bool = False,
 ) -> ManagerBasedRlEnvCfg:
   cfg = make_tracking_env_cfg(
-    num_envs=num_envs, action_mode=action_mode, obs_mode=obs_mode
+    num_envs=num_envs, action_mode=action_mode, obs_mode=obs_mode,
+    scale_rewards_by_dt=scale_rewards_by_dt,
   )
 
   cfg.scene.entities = {

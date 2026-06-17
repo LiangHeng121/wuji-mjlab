@@ -31,7 +31,8 @@ from wuji_mjlab.tasks.tracking.mdp.commands import HandObjectMotionCommandCfg
 
 
 def make_tracking_env_cfg(
-  num_envs: int = 4096, action_mode: str = "offset", obs_mode: str = "full"
+  num_envs: int = 4096, action_mode: str = "offset", obs_mode: str = "full",
+  scale_rewards_by_dt: bool = False,
 ) -> ManagerBasedRlEnvCfg:
   """Create the base hand+object tracking config.
 
@@ -39,6 +40,9 @@ def make_tracking_env_cfg(
     (DexTrack-exact accumulative per-group residual).
   obs_mode: "full" (default; faithful DexTrack pure_state_wref_wdelta obs, ~499-d
     incl 256-d object latent) or "simple" (the 114-d set the first success used).
+  scale_rewards_by_dt: False (default) matches DexTrack/rl_games (no dt scaling ->
+    episode returns ~hundreds). True is the original mjlab default (dt-scaled ->
+    single-digit returns; the first success used True).
   """
 
   ##
@@ -218,4 +222,5 @@ def make_tracking_env_cfg(
     ),
     decimation=2,  # control dt = 0.0166 s ~= GRAB 60 Hz reference
     episode_length_s=5.0,  # ~300 control steps
+    scale_rewards_by_dt=scale_rewards_by_dt,
   )
