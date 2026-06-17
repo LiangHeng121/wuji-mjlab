@@ -9,12 +9,24 @@ from wuji_mjlab.rl.runner import WujiOnPolicyRunner
 from .env_cfgs import wuji_hand_cubesmall_tracking_env_cfg
 from .rsl_rl.ppo import wuji_hand_tracking_ppo_runner_cfg
 
-# DEFAULT: full (DexTrack-faithful) obs + offset action (the proven action/kp/reward).
+# DEFAULT: DexTrack-faithful — full obs + wdelta accumulative action (finger
+# dof_speed_scale reduced 20->5 for MuJoCo) + kp x8 + magnitude-aligned rewards.
+# Verified: cube lifted to 0.407 m, 2 mm tracking, low jitter (0.062/step).
 register_mjlab_task(
   task_id="WujiHand_Tracking_Cubesmall",
-  env_cfg=wuji_hand_cubesmall_tracking_env_cfg(num_envs=4096),  # obs full, action offset
-  play_env_cfg=wuji_hand_cubesmall_tracking_env_cfg(play=True),
+  env_cfg=wuji_hand_cubesmall_tracking_env_cfg(num_envs=4096, action_mode="wdelta"),
+  play_env_cfg=wuji_hand_cubesmall_tracking_env_cfg(play=True, action_mode="wdelta"),
   rl_cfg=wuji_hand_tracking_ppo_runner_cfg(max_iterations=10000),
+  runner_cls=WujiOnPolicyRunner,
+)
+
+# Variant: offset action (uniform residual 0.1). Also works (0.408 m); the proven
+# first config before wdelta was tuned.
+register_mjlab_task(
+  task_id="WujiHand_Tracking_Cubesmall_Offset",
+  env_cfg=wuji_hand_cubesmall_tracking_env_cfg(num_envs=4096, action_mode="offset"),
+  play_env_cfg=wuji_hand_cubesmall_tracking_env_cfg(play=True, action_mode="offset"),
+  rl_cfg=wuji_hand_tracking_ppo_runner_cfg(run_name="Tracking_Offset", max_iterations=10000),
   runner_cls=WujiOnPolicyRunner,
 )
 
@@ -30,11 +42,4 @@ register_mjlab_task(
   runner_cls=WujiOnPolicyRunner,
 )
 
-# DexTrack-faithful: full obs + wdelta accumulative action ("only the simulator differs").
-register_mjlab_task(
-  task_id="WujiHand_Tracking_Cubesmall_Wdelta",
-  env_cfg=wuji_hand_cubesmall_tracking_env_cfg(num_envs=4096, action_mode="wdelta"),
-  play_env_cfg=wuji_hand_cubesmall_tracking_env_cfg(play=True, action_mode="wdelta"),
-  rl_cfg=wuji_hand_tracking_ppo_runner_cfg(run_name="Tracking_Wdelta", max_iterations=10000),
-  runner_cls=WujiOnPolicyRunner,
-)
+# (wdelta is now the default WujiHand_Tracking_Cubesmall above.)
