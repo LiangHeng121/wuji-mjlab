@@ -132,9 +132,13 @@ def fair_reward_metric(env, command_name: str = "motion") -> torch.Tensor:
   hand_pose 0.6/0.1/0.1, finger/palm-obj dist palm_dist_rew_w=2.0 + grip 0.22 +
   4-finger sum, gated obj pos + in-place bonus; NO pinall3 / NO patches).
 
-  Logged to extras['log']['fair_reward'] every step so all reward configs share
-  ONE comparable live curve in wandb/tensorboard. Returns zeros -> the reward
-  manager adds 0 to the training reward (this is a metric, not a training term).
+  Logged to extras['log']['fair_reward'] for a comparable live wandb/tb curve.
+  Reports the EPISODE-SUM (DexTrack reward_fair semantics): per-env fair is
+  accumulated over the episode and, on reset, the mean sum of the just-finished
+  episodes is published -- directly comparable to the single-seq fair (~200), not
+  the per-step mean (~0.7). The reward manager runs AFTER termination, so
+  env.reset_buf already holds this step's dones. Returns zeros -> no training
+  contribution (this is a metric, not a training term).
   """
   hp = hand_pose_tracking(env, command_name, 0.6, 0.1, 0.1)
   fo = finger_object_distance(env, command_name, palm_dist_rew_w=2.0,
@@ -142,9 +146,24 @@ def fair_reward_metric(env, command_name: str = "motion") -> torch.Tensor:
   op = object_pos_tracking(env, command_name, grip_thres=0.22, n_finger_sum=4)
   ib = object_inplace_bonus(env, command_name, grip_thres=0.22, n_finger_sum=4)
   fair = 0.5 * hp + 0.3 * fo + 1.0 * op + 1.0 * ib
+
+  accum = getattr(env, "_fair_accum", None)
+  if accum is None or accum.shape[0] != fair.shape[0]:
+    accum = torch.zeros_like(fair)
+    env._fair_last = torch.zeros((), device=fair.device)
+  accum = accum + fair
+  done = env.reset_buf.bool()
+  if bool(done.any()):
+    env._fair_last = accum[done].mean()       # mean episode-sum of finished episodes
+    accum = accum.clone()
+    accum[done] = 0.0
+  env._fair_accum = accum
+
+  # Publish every step: the reset step's extras['log'] gets wiped by _reset_idx,
+  # but the value persists in env._fair_last and is re-published next step.
   log = env.extras.setdefault("log", {}) if isinstance(env.extras, dict) else None
   if log is not None:
-    log["fair_reward"] = fair.mean()
+    log["fair_reward"] = env._fair_last
   return torch.zeros_like(fair)
 
 
