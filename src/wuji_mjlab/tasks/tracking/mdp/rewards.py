@@ -127,6 +127,27 @@ def palm_pos_tracking(env, command_name: str = "motion") -> torch.Tensor:
   return -torch.norm(sim_palm - cmd.ref_palm_pos, p=2, dim=-1)
 
 
+def fair_reward_metric(env, command_name: str = "motion") -> torch.Tensor:
+  """Config-independent FAIR reward (DexTrack fair@0.22 canonical base coefs:
+  hand_pose 0.6/0.1/0.1, finger/palm-obj dist palm_dist_rew_w=2.0 + grip 0.22 +
+  4-finger sum, gated obj pos + in-place bonus; NO pinall3 / NO patches).
+
+  Logged to extras['log']['fair_reward'] every step so all reward configs share
+  ONE comparable live curve in wandb/tensorboard. Returns zeros -> the reward
+  manager adds 0 to the training reward (this is a metric, not a training term).
+  """
+  hp = hand_pose_tracking(env, command_name, 0.6, 0.1, 0.1)
+  fo = finger_object_distance(env, command_name, palm_dist_rew_w=2.0,
+                              grip_thres=0.22, n_finger_sum=4)
+  op = object_pos_tracking(env, command_name, grip_thres=0.22, n_finger_sum=4)
+  ib = object_inplace_bonus(env, command_name, grip_thres=0.22, n_finger_sum=4)
+  fair = 0.5 * hp + 0.3 * fo + 1.0 * op + 1.0 * ib
+  log = env.extras.setdefault("log", {}) if isinstance(env.extras, dict) else None
+  if log is not None:
+    log["fair_reward"] = fair.mean()
+  return torch.zeros_like(fair)
+
+
 # ----- cgsmooth_b2_softclip patches (on top of pinall3) ---------------------
 
 

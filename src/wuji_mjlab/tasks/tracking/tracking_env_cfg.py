@@ -184,6 +184,12 @@ def make_tracking_env_cfg(
     ),
   }
 
+  # FAIR metric: config-independent comparable reward, logged to wandb/tb (weight
+  # 1.0 but the func returns 0 -> no training contribution; see fair_reward_metric).
+  rewards["fair_reward_metric"] = RewardTermCfg(
+    func=mdp.fair_reward_metric, weight=1.0, params={"command_name": "motion"},
+  )
+
   if reward_mode != "original":  # pinall3 dense fingertip/palm tracking terms
     rewards["finger_pos_tracking"] = RewardTermCfg(  # FINGER_POS_COEF=1.0
       func=mdp.finger_pos_tracking, weight=1.0, params={"command_name": "motion"},
