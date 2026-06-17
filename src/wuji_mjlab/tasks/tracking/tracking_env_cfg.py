@@ -79,7 +79,10 @@ def make_tracking_env_cfg(num_envs: int = 4096) -> ManagerBasedRlEnvCfg:
     "joint_pos": KinematicsBiasActionCfg(
       entity_name="robot",
       actuator_names=(".*",),
-      action_scale=0.5,
+      # Small residual: the zero-residual reference already lifts the cube (with
+      # kp x8), so constrain the policy to small corrections around it instead of
+      # letting it drift off into a "track-but-don't-grip" local optimum.
+      action_scale=0.1,
       command_name="motion",
     )
   }
