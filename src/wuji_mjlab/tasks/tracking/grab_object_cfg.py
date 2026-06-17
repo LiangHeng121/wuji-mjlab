@@ -29,9 +29,10 @@ GRAB_MESH_DIR = Path(
   "/home/liangh/DexTrack/GRAB/unzipped/tools/object_meshes/contact_meshes"
 )
 GRAB_SCALE = 1.25
-# GRAB cube density back-calculated from cube.xml baseline (~683 kg/m^3); a
-# reasonable default for the light plastic GRAB props.
-DEFAULT_DENSITY = 683.0
+# DexTrack/Isaac Gym used a uniform rigid_obj_density=500 for ALL objects (not
+# real per-object masses). Match it: the reference trajectories were generated
+# under uniform-density physics, so consistency beats physical accuracy here.
+DEFAULT_DENSITY = 500.0
 
 # Hand contact params win (priority=1 on the hand); object is priority 0.
 _OBJ_FRICTION = (0.3, 0.005, 0.0001)
@@ -88,6 +89,11 @@ def _build_spec(
   body.name = "obj"
   body.add_freejoint()
 
+  # All geoms are massless; the body's mass + inertia are set EXPLICITLY from
+  # the true (non-convex) mesh below. This avoids two MuJoCo pitfalls:
+  #  - per-part density double-counts mass where CoACD pieces overlap, and
+  #  - a single mesh geom's auto-mass uses the CONVEX HULL volume (way too
+  #    heavy for hollow objects like a cup).
   gv = body.add_geom()
   gv.type = mujoco.mjtGeom.mjGEOM_MESH
   gv.meshname = "obj_visual"
@@ -102,14 +108,32 @@ def _build_spec(
     gc.type = mujoco.mjtGeom.mjGEOM_MESH
     gc.meshname = f"obj_col_{i}"
     gc.group = 3
-    gc.density = density
+    gc.density = 0.0
     gc.friction = list(_OBJ_FRICTION)
     gc.solref = list(_OBJ_SOLREF)
     gc.solimp = list(_OBJ_SOLIMP)
     gc.condim = 3
     gc.priority = 0
 
+  _set_true_inertial(body, tm, density)
   return spec
+
+
+def _set_true_inertial(body, tm: trimesh.Trimesh, density: float) -> None:
+  """Set body mass + inertia from the true mesh volume (not the convex hull)."""
+  mass = float(tm.volume * density)
+  com = np.asarray(tm.center_mass, dtype=float)
+  inertia = np.asarray(tm.moment_inertia, dtype=float) * density  # about COM
+  evals, evecs = np.linalg.eigh(inertia)
+  if np.linalg.det(evecs) < 0:  # ensure a proper rotation
+    evecs[:, 0] *= -1.0
+  quat = np.zeros(4)
+  mujoco.mju_mat2Quat(quat, evecs.flatten())
+  body.mass = mass
+  body.ipos = com.tolist()
+  body.iquat = quat.tolist()
+  body.inertia = np.clip(evals, 1e-9, None).tolist()
+  body.explicitinertial = True
 
 
 def get_grab_object_cfg(
