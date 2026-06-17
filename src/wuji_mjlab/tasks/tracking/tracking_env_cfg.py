@@ -161,8 +161,12 @@ def make_tracking_env_cfg(num_envs: int = 4096) -> ManagerBasedRlEnvCfg:
       azimuth=130.0,
     ),
     sim=SimulationCfg(
-      nconmax=200,
-      njmax=800,
+      # Per-env contact/constraint buffer caps. These dominate mujoco-warp
+      # memory; 200/800 was wildly over-provisioned (cut 22000-env VRAM ~2x).
+      # 128/640 leaves margin over a single-cube grasp (reorient, far more
+      # contact-heavy, uses 180) while fitting 22000 envs comfortably.
+      nconmax=96,
+      njmax=512,
       mujoco=MujocoCfg(
         timestep=0.0083,
         iterations=10,
