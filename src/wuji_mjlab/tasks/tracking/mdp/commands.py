@@ -89,7 +89,9 @@ class HandObjectMotionCommand(CommandTerm):
 
   @property
   def ref_obj_pos(self) -> torch.Tensor:
-    return self._ref_obj_pos[self.time_steps] + self._env.scene.env_origins
+    # mjlab sim positions here are env-local (site_pos_w / root_link_pos_w do NOT
+    # include env_origins), so references must NOT add env_origins either.
+    return self._ref_obj_pos[self.time_steps]
 
   @property
   def ref_obj_quat(self) -> torch.Tensor:
@@ -97,12 +99,12 @@ class HandObjectMotionCommand(CommandTerm):
 
   @property
   def ref_fingertip_pos(self) -> torch.Tensor:
-    # (E,5,3) world frame (+ env origin); order th,ff,mf,rf,lf
-    return self._ref_tip_pos[self.time_steps] + self._env.scene.env_origins[:, None, :]
+    # (E,5,3) env-local frame; order th,ff,mf,rf,lf
+    return self._ref_tip_pos[self.time_steps]
 
   @property
   def ref_palm_pos(self) -> torch.Tensor:
-    return self._ref_palm_pos[self.time_steps] + self._env.scene.env_origins
+    return self._ref_palm_pos[self.time_steps]
 
   @property
   def command(self) -> torch.Tensor:
@@ -133,7 +135,8 @@ class HandObjectMotionCommand(CommandTerm):
     self.robot.reset(env_ids=env_ids)
 
     # Write object freejoint = reference object pose (zero velocity).
-    pos = self._ref_obj_pos[t] + self._env.scene.env_origins[env_ids]
+    # Env-local frame: no env_origins (see ref_obj_pos note).
+    pos = self._ref_obj_pos[t]
     quat = self._ref_obj_quat[t]
     vel = torch.zeros(len(env_ids), 6, device=self.device)
     root_state = torch.cat([pos, quat, vel], dim=-1)
