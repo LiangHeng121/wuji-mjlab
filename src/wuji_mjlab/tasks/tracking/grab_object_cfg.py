@@ -75,7 +75,9 @@ def _build_spec(
   rgba: tuple[float, float, float, float],
   coacd_threshold: float,
   max_hulls: int,
+  friction: float | None = None,
 ) -> mujoco.MjSpec:
+  fric = (friction, _OBJ_FRICTION[1], _OBJ_FRICTION[2]) if friction is not None else _OBJ_FRICTION
   tm = trimesh.load(str(ply), force="mesh")
   tm.apply_scale(scale)
 
@@ -109,7 +111,7 @@ def _build_spec(
     gc.meshname = f"obj_col_{i}"
     gc.group = 3
     gc.density = 0.0
-    gc.friction = list(_OBJ_FRICTION)
+    gc.friction = list(fric)
     gc.solref = list(_OBJ_SOLREF)
     gc.solimp = list(_OBJ_SOLIMP)
     gc.condim = 3
@@ -144,6 +146,7 @@ def get_grab_object_cfg(
   init_pos: tuple[float, float, float] = (0.0, 0.0, 0.1),
   coacd_threshold: float = 0.05,
   max_hulls: int = 24,
+  friction: float | None = None,
 ) -> EntityCfg:
   """Build a free-floating EntityCfg for GRAB object ``name`` (e.g. 'cubesmall')."""
   ply = GRAB_MESH_DIR / f"{name}.ply"
@@ -152,6 +155,6 @@ def get_grab_object_cfg(
   return EntityCfg(
     init_state=EntityCfg.InitialStateCfg(pos=init_pos, rot=(1.0, 0.0, 0.0, 0.0)),
     spec_fn=partial(
-      _build_spec, ply, scale, density, rgba, coacd_threshold, max_hulls
+      _build_spec, ply, scale, density, rgba, coacd_threshold, max_hulls, friction
     ),
   )

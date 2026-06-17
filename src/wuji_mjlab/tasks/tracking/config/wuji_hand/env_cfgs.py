@@ -24,7 +24,8 @@ _OBJ_LATENT_FILE = "/home/liangh/DexTrack/assets/obj_type_to_obj_feat.npy"
 def wuji_hand_cubesmall_tracking_env_cfg(
   play: bool = False, num_envs: int = 4096,
   action_mode: str = "offset", obs_mode: str = "full",
-  scale_rewards_by_dt: bool = False,
+  scale_rewards_by_dt: bool = False, finger_kp_scale: float = 8.0,
+  obj_friction: float | None = None,
 ) -> ManagerBasedRlEnvCfg:
   cfg = make_tracking_env_cfg(
     num_envs=num_envs, action_mode=action_mode, obs_mode=obs_mode,
@@ -32,8 +33,10 @@ def wuji_hand_cubesmall_tracking_env_cfg(
   )
 
   cfg.scene.entities = {
-    "robot": get_wuji_fly_hand_cfg(),
-    "object": get_grab_object_cfg(_OBJECT_NAME),
+    "robot": get_wuji_fly_hand_cfg(finger_kp_scale=finger_kp_scale),
+    "object": get_grab_object_cfg(
+      _OBJECT_NAME, **({"friction": obj_friction} if obj_friction is not None else {})
+    ),
   }
   cfg.commands["motion"].motion_file = _MOTION_FILE
   cfg.commands["motion"].obj_latent_file = _OBJ_LATENT_FILE

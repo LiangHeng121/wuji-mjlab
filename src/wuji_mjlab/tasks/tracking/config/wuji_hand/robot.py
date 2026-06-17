@@ -28,7 +28,7 @@ _FLY_XML = (
 assert _FLY_XML.exists(), f"missing fly hand xml: {_FLY_XML}"
 
 
-def _get_spec() -> mujoco.MjSpec:
+def _get_spec(finger_kp_scale: float = 8.0, finger_kv_scale: float = 3.0) -> mujoco.MjSpec:
   spec = mujoco.MjSpec.from_file(str(_FLY_XML))
   mesh_root = (_FLY_XML.parent / spec.meshdir).resolve()
   assets: dict[str, bytes] = {}
@@ -36,6 +36,16 @@ def _get_spec() -> mujoco.MjSpec:
     for f in mesh_root.glob(pattern):
       assets[f"{spec.meshdir}/{f.name}"] = f.read_bytes()
   spec.assets = assets
+
+  # Scale FINGER position-actuator gains (the XML holds the vendor sim2real values;
+  # they're too weak to hold a lifted object in MuJoCo). Base WRJ0* unchanged.
+  # Default 8x/3x reproduces the verified working config. This is the ablation knob.
+  if finger_kp_scale != 1.0 or finger_kv_scale != 1.0:
+    for act in spec.actuators:
+      if "finger" in act.name and "WRJ0" not in act.name:
+        gp = act.gainprm.copy(); gp[0] *= finger_kp_scale; act.gainprm = gp
+        bp = act.biasprm.copy(); bp[1] *= finger_kp_scale; bp[2] *= finger_kv_scale
+        act.biasprm = bp
   return spec
 
 
@@ -80,9 +90,11 @@ WUJI_FLY_HAND_HOME = EntityCfg.InitialStateCfg(
 )
 
 
-def get_wuji_fly_hand_cfg() -> EntityCfg:
+def get_wuji_fly_hand_cfg(
+  finger_kp_scale: float = 8.0, finger_kv_scale: float = 3.0
+) -> EntityCfg:
   return EntityCfg(
     init_state=WUJI_FLY_HAND_HOME,
-    spec_fn=_get_spec,
+    spec_fn=partial(_get_spec, finger_kp_scale, finger_kv_scale),
     articulation=WUJI_FLY_HAND_ARTICULATION,
   )
