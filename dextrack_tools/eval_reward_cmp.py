@@ -101,7 +101,10 @@ def eval_one(label: str, task: str) -> dict:
                        ).reshape(N_ENVS, 5, 3) + obj.data.root_link_pos_w.unsqueeze(1)
     d = torch.norm(robot.data.site_pos_w[:, tip_idx] - world, dim=-1)  # (E,5)
     if fl.sum() > 0:
-      cdist.append(((d * fl).sum() / fl.sum()).item())
+      # per-env mean over contact fingers, then mean over envs (NOT a global sum
+      # over envs/fingers divided by #fingers -- that inflates by #envs).
+      per_env = (d * fl).sum(dim=-1) / (fl.sum() + 1e-6)  # (E,)
+      cdist.append(per_env.mean().item())
 
   ozs, rzs = np.array(ozs), np.array(rzs)
   res = {
