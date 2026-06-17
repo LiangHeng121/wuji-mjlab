@@ -101,23 +101,30 @@ def make_tracking_env_cfg(num_envs: int = 4096) -> ManagerBasedRlEnvCfg:
   # Rewards
   ##
 
+  # Faithful port of DexTrack's base reward (no pinall3/cgsmooth/B2/softclip/idle
+  # patches). Weights = DexTrack coefs; funcs return the (negative) penalties.
   rewards: dict[str, RewardTermCfg] = {
-    "joint_tracking": RewardTermCfg(
-      func=mdp.joint_tracking_exp,
-      weight=1.0,
-      params={"command_name": "motion", "std": 0.5},
-    ),
-    "object_pos_tracking": RewardTermCfg(
-      func=mdp.object_pos_tracking_exp,
-      weight=1.0,
-      params={"command_name": "motion", "std": 0.05},
-    ),
-    "object_ori_tracking": RewardTermCfg(
-      func=mdp.object_ori_tracking_exp,
+    "hand_pose_tracking": RewardTermCfg(  # rew_delta_hand_pose_coef = 0.5
+      func=mdp.hand_pose_tracking,
       weight=0.5,
-      params={"command_name": "motion", "std": 0.5},
+      params={"command_name": "motion",
+              "trans_coef": 0.6, "rot_coef": 0.1, "finger_coef": 0.1},
     ),
-    "action_rate_l2": RewardTermCfg(func=mdp.action_rate_l2, weight=-1e-2),
+    "finger_object_distance": RewardTermCfg(  # rew_finger_obj_dist_coef = 0.5
+      func=mdp.finger_object_distance,
+      weight=0.5,
+      params={"command_name": "motion", "palm_dist_rew_w": 2.0},
+    ),
+    "object_pos_tracking": RewardTermCfg(  # goal_hand_rew, gated by grasp flag
+      func=mdp.object_pos_tracking,
+      weight=1.0,
+      params={"command_name": "motion"},
+    ),
+    "object_inplace_bonus": RewardTermCfg(  # in-place bonus, gated by grasp flag
+      func=mdp.object_inplace_bonus,
+      weight=1.0,
+      params={"command_name": "motion"},
+    ),
   }
 
   ##

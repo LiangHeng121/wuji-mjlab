@@ -41,7 +41,9 @@ def _get_spec() -> mujoco.MjSpec:
 
 WUJI_FLY_HAND_ARTICULATION = EntityArticulationInfoCfg(
   actuators=(
-    XmlActuatorCfg(target_names_expr=(".*",)),  # all 26 joints (base + fingers)
+    # 26 joints: 6 base (WRJ0*) + 20 finger joints. Explicit patterns avoid also
+    # matching the fingertip sites (right_finger*_tip).
+    XmlActuatorCfg(target_names_expr=("WRJ0.*", ".*_finger.*_joint.*")),
   ),
   soft_joint_pos_limit_factor=0.9,
 )
