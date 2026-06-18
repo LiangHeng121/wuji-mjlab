@@ -67,19 +67,56 @@ _MOTION_DIR = _DATA_DIR / "data"
 _CONTACT_DIR = _DATA_DIR / "contact_grab2"
 
 
-def _cubesmall_sequences() -> list[str]:
-  """All cubesmall seq names with motion+contact data, excluding 'offhand'."""
+def _object_sequences(obj: str, extra_exclude: tuple[str, ...] = ()) -> list[str]:
+  """All seq names for GRAB object ``obj`` with motion+contact data, excluding
+  'offhand' (+ any extra_exclude substrings, e.g. 'cup_pass' per the multiobj doc)."""
   seqs = []
-  for p in sorted(_MOTION_DIR.glob("wuji_passive_active_info_*cubesmall*_nf_300.npy")):
+  for p in sorted(_MOTION_DIR.glob(f"wuji_passive_active_info_*_{obj}_*_nf_300.npy")):
     seq = p.name.replace("wuji_passive_active_info_", "").replace("_nf_300.npy", "")
-    if "offhand" in seq:
+    if "offhand" in seq or any(x in seq for x in extra_exclude):
       continue
     if not (_CONTACT_DIR / f"{seq}_contact.npy").exists():
       continue  # need contact for cgsmooth; keep the set consistent across configs
     seqs.append(seq)
   if not seqs:
-    raise FileNotFoundError(f"no cubesmall sequences under {_MOTION_DIR}")
+    raise FileNotFoundError(f"no '{obj}' sequences under {_MOTION_DIR}")
   return seqs
+
+
+def _cubesmall_sequences() -> list[str]:  # back-compat for eval/render tools
+  return _object_sequences("cubesmall")
+
+
+def wuji_hand_multi_tracking_env_cfg(
+  object_name: str = "cubesmall", play: bool = False, num_envs: int = 4096,
+  action_mode: str = "wdelta", obs_mode: str = "full",
+  scale_rewards_by_dt: bool = False, finger_kp_scale: float = 1.0,
+  reward_mode: str = "cgsmooth_b2_softclip", extra_exclude: tuple[str, ...] = (),
+) -> ManagerBasedRlEnvCfg:
+  """Single-object multi-sequence generalist over all sequences of ``object_name``
+  (NO offhand). Each env gets a random sequence, resampled on reset. cup is concave
+  -> CoACD; apple/cubesmall near-convex -> single hull (handled in grab_object_cfg)."""
+  cfg = make_tracking_env_cfg(
+    num_envs=num_envs, action_mode=action_mode, obs_mode=obs_mode,
+    scale_rewards_by_dt=scale_rewards_by_dt, reward_mode=reward_mode,
+  )
+  cfg.scene.entities = {
+    "robot": get_wuji_fly_hand_cfg(finger_kp_scale=finger_kp_scale),
+    "object": get_grab_object_cfg(object_name),
+  }
+  seqs = _object_sequences(object_name, extra_exclude)
+  cfg.commands["motion"].motion_files = tuple(
+    str(_MOTION_DIR / f"wuji_passive_active_info_{s}_nf_300.npy") for s in seqs)
+  cfg.commands["motion"].obj_latent_file = _OBJ_LATENT_FILE
+  if reward_mode == "cgsmooth_b2_softclip":
+    cfg.commands["motion"].contact_files = tuple(
+      str(_CONTACT_DIR / f"{s}_contact.npy") for s in seqs)
+  cfg.viewer.body_name = "right_palm_link"
+
+  if play:
+    cfg.scene.num_envs = 4
+    cfg.observations["policy"].enable_corruption = False
+  return cfg
 
 
 def wuji_hand_cubesmall_multi_tracking_env_cfg(
@@ -88,27 +125,8 @@ def wuji_hand_cubesmall_multi_tracking_env_cfg(
   scale_rewards_by_dt: bool = False, finger_kp_scale: float = 1.0,
   reward_mode: str = "pinall3",
 ) -> ManagerBasedRlEnvCfg:
-  """Generalist over all cubesmall sequences (s1..s10 inspect/lift/pass, NO offhand).
-  Each env is assigned a random sequence, resampled on episode reset."""
-  cfg = make_tracking_env_cfg(
-    num_envs=num_envs, action_mode=action_mode, obs_mode=obs_mode,
-    scale_rewards_by_dt=scale_rewards_by_dt, reward_mode=reward_mode,
-  )
-  cfg.scene.entities = {
-    "robot": get_wuji_fly_hand_cfg(finger_kp_scale=finger_kp_scale),
-    "object": get_grab_object_cfg(_OBJECT_NAME),
-  }
-  seqs = _cubesmall_sequences()
-  motion_files = tuple(str(_MOTION_DIR / f"wuji_passive_active_info_{s}_nf_300.npy") for s in seqs)
-  cfg.commands["motion"].motion_files = motion_files
-  cfg.commands["motion"].obj_latent_file = _OBJ_LATENT_FILE
-  if reward_mode == "cgsmooth_b2_softclip":
-    cfg.commands["motion"].contact_files = tuple(
-      str(_CONTACT_DIR / f"{s}_contact.npy") for s in seqs
-    )
-  cfg.viewer.body_name = "right_palm_link"
-
-  if play:
-    cfg.scene.num_envs = 4
-    cfg.observations["policy"].enable_corruption = False
-  return cfg
+  """Cubesmall generalist (kept for the existing 3-way comparison runs)."""
+  return wuji_hand_multi_tracking_env_cfg(
+    object_name="cubesmall", play=play, num_envs=num_envs, action_mode=action_mode,
+    obs_mode=obs_mode, scale_rewards_by_dt=scale_rewards_by_dt,
+    finger_kp_scale=finger_kp_scale, reward_mode=reward_mode)

@@ -9,6 +9,7 @@ from wuji_mjlab.rl.runner import WujiOnPolicyRunner
 from .env_cfgs import (
   wuji_hand_cubesmall_multi_tracking_env_cfg,
   wuji_hand_cubesmall_tracking_env_cfg,
+  wuji_hand_multi_tracking_env_cfg,
 )
 from .rsl_rl.ppo import wuji_hand_tracking_ppo_runner_cfg
 
@@ -93,5 +94,25 @@ for _rid, _rmode in (
       play=True, reward_mode=_rmode),
     rl_cfg=wuji_hand_tracking_ppo_runner_cfg(
       run_name=f"Tracking_CubesmallMulti_{_rid}", max_iterations=10000),
+    runner_cls=WujiOnPolicyRunner,
+  )
+
+# ----- single-object specialists: cup / apple (cgsmooth_b2_softclip, kp x1) -----
+# cup: all non-offhand (drink/lift/pour). apple: all non-offhand (eat/lift/pass,
+# matching the DexTrack run -- eat kept per user). Both use B2 cgsmooth recipe.
+for _oid, _obj, _excl in (
+  ("Cup", "cup", ()),
+  ("Apple", "apple", ()),
+):
+  register_mjlab_task(
+    task_id=f"WujiHand_Tracking_{_oid}Multi_CGSmooth",
+    env_cfg=wuji_hand_multi_tracking_env_cfg(
+      object_name=_obj, num_envs=4096, reward_mode="cgsmooth_b2_softclip",
+      extra_exclude=_excl),
+    play_env_cfg=wuji_hand_multi_tracking_env_cfg(
+      object_name=_obj, play=True, reward_mode="cgsmooth_b2_softclip",
+      extra_exclude=_excl),
+    rl_cfg=wuji_hand_tracking_ppo_runner_cfg(
+      run_name=f"Tracking_{_oid}Multi_CGSmooth", max_iterations=10000),
     runner_cls=WujiOnPolicyRunner,
   )
