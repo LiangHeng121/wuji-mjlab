@@ -65,6 +65,10 @@ _DATA_DIR = Path(
 )
 _MOTION_DIR = _DATA_DIR / "data"
 _CONTACT_DIR = _DATA_DIR / "contact_grab2"
+# Deep-concave / grasp-from-outside objects: use ONE convex collision hull. Their
+# CoACD multi-hull decomposition has thin/degenerate hulls -> near-singular contacts
+# -> object velocity explodes to 1e4+ -> NaN (cup reproduced; apple near-convex too).
+_CONVEX_HULL_OBJS = {"cup", "apple"}
 
 
 def _object_sequences(obj: str, extra_exclude: tuple[str, ...] = ()) -> list[str]:
@@ -102,7 +106,8 @@ def wuji_hand_multi_tracking_env_cfg(
   )
   cfg.scene.entities = {
     "robot": get_wuji_fly_hand_cfg(finger_kp_scale=finger_kp_scale),
-    "object": get_grab_object_cfg(object_name),
+    "object": get_grab_object_cfg(
+      object_name, convex_hull=(object_name in _CONVEX_HULL_OBJS)),
   }
   seqs = _object_sequences(object_name, extra_exclude)
   cfg.commands["motion"].motion_files = tuple(
@@ -154,7 +159,8 @@ def wuji_hand_3obj_multi_tracking_env_cfg(
   )
   ents = {"robot": get_wuji_fly_hand_cfg(finger_kp_scale=finger_kp_scale)}
   for j, o in enumerate(objs):  # distinct spawn pos so they don't overlap pre-reset
-    ents[f"object_{o}"] = get_grab_object_cfg(o, init_pos=(10.0 + 2.0 * j, 0.0, 0.1))
+    ents[f"object_{o}"] = get_grab_object_cfg(
+      o, init_pos=(10.0 + 2.0 * j, 0.0, 0.1), convex_hull=(o in _CONVEX_HULL_OBJS))
   cfg.scene.entities = ents
 
   motion, contact, seq_obj = [], [], []

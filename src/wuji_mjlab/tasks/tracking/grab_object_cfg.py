@@ -76,6 +76,7 @@ def _build_spec(
   coacd_threshold: float,
   max_hulls: int,
   friction: float | None = None,
+  convex_hull: bool = False,
 ) -> mujoco.MjSpec:
   fric = (friction, _OBJ_FRICTION[1], _OBJ_FRICTION[2]) if friction is not None else _OBJ_FRICTION
   tm = trimesh.load(str(ply), force="mesh")
@@ -83,7 +84,11 @@ def _build_spec(
 
   spec = mujoco.MjSpec()
   _add_inline_mesh(spec, "obj_visual", tm)
-  parts = _convex_parts(tm, coacd_threshold, max_hulls)
+  # convex_hull=True -> ONE convex hull (collision). CoACD's thin/degenerate hulls
+  # for deep-concave objects (cup) create near-singular contacts -> velocity blows
+  # up to 1e4+ -> NaN. A single hull is rock-stable; fine for grasp-from-outside
+  # objects (cup/apple held by the body/rim, not the cavity).
+  parts = [tm.convex_hull] if convex_hull else _convex_parts(tm, coacd_threshold, max_hulls)
   for i, p in enumerate(parts):
     _add_inline_mesh(spec, f"obj_col_{i}", p)
 
@@ -147,14 +152,18 @@ def get_grab_object_cfg(
   coacd_threshold: float = 0.05,
   max_hulls: int = 24,
   friction: float | None = None,
+  convex_hull: bool = False,
 ) -> EntityCfg:
-  """Build a free-floating EntityCfg for GRAB object ``name`` (e.g. 'cubesmall')."""
+  """Build a free-floating EntityCfg for GRAB object ``name`` (e.g. 'cubesmall').
+  convex_hull=True forces a single convex collision hull (stable for deep-concave
+  objects like cup whose CoACD hulls blow up; see _build_spec)."""
   ply = GRAB_MESH_DIR / f"{name}.ply"
   if not ply.exists():
     raise FileNotFoundError(f"GRAB mesh not found: {ply}")
   return EntityCfg(
     init_state=EntityCfg.InitialStateCfg(pos=init_pos, rot=(1.0, 0.0, 0.0, 0.0)),
     spec_fn=partial(
-      _build_spec, ply, scale, density, rgba, coacd_threshold, max_hulls, friction
+      _build_spec, ply, scale, density, rgba, coacd_threshold, max_hulls, friction,
+      convex_hull,
     ),
   )
