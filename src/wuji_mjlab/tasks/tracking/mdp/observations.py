@@ -24,20 +24,17 @@ from mjlab.managers.scene_entity_config import SceneEntityCfg
 
 def object_pos_b(env, command_name: str = "motion") -> torch.Tensor:
   cmd = env.command_manager.get_term(command_name)
-  obj = env.scene[cmd.cfg.object_entity_name]
-  return obj.data.root_link_pos_w - env.scene.env_origins
+  return cmd.obj_pos - env.scene.env_origins
 
 
 def object_quat_w(env, command_name: str = "motion") -> torch.Tensor:
   cmd = env.command_manager.get_term(command_name)
-  obj = env.scene[cmd.cfg.object_entity_name]
-  return obj.data.root_link_quat_w
+  return cmd.obj_quat
 
 
 def object_pos_error(env, command_name: str = "motion") -> torch.Tensor:
   cmd = env.command_manager.get_term(command_name)
-  obj = env.scene[cmd.cfg.object_entity_name]
-  return cmd.ref_obj_pos - obj.data.root_link_pos_w
+  return cmd.ref_obj_pos - cmd.obj_pos
 
 
 # --- full DexTrack-faithful obs -------------------------------------------
@@ -49,7 +46,7 @@ _PALM_BODY = "right_palm_link"
 def _idx(env, command_name):
   cmd = env.command_manager.get_term(command_name)
   robot = env.scene[cmd.cfg.hand_entity_name]
-  obj = env.scene[cmd.cfg.object_entity_name]
+  obj = cmd.obj  # objs[0] in both modes; object state via cmd.obj_* accessors
   cache = getattr(env, "_fullobs_idx", None)
   if cache is None:
     fin = robot.find_bodies(list(_FINGER_BODIES), preserve_order=True)[0]
@@ -63,7 +60,7 @@ def ho_hand_qpos(env, command_name: str = "motion") -> torch.Tensor:
   """Hand qpos (26), base translation made object-relative (use_local_canonical_state)."""
   cmd, robot, obj, _, _ = _idx(env, command_name)
   qp = robot.data.joint_pos.clone()
-  qp[:, :3] = qp[:, :3] - obj.data.root_link_pos_w
+  qp[:, :3] = qp[:, :3] - cmd.obj_pos
   return qp
 
 
@@ -85,7 +82,7 @@ def ho_fingertip_state(env, command_name: str = "motion") -> torch.Tensor:
 def ho_palm_state(env, command_name: str = "motion") -> torch.Tensor:
   """Palm pos (object-relative, 3) + palm euler (3) = base rot joints q26[3:6]."""
   cmd, robot, obj, _, palm = _idx(env, command_name)
-  palm_pos = robot.data.body_link_pos_w[:, palm] - obj.data.root_link_pos_w
+  palm_pos = robot.data.body_link_pos_w[:, palm] - cmd.obj_pos
   palm_euler = robot.data.joint_pos[:, 3:6]  # fly base rot == palm orientation
   return torch.cat([palm_pos, palm_euler], dim=-1)
 
@@ -93,13 +90,13 @@ def ho_palm_state(env, command_name: str = "motion") -> torch.Tensor:
 def ho_object_state(env, command_name: str = "motion") -> torch.Tensor:
   """obj pos_delta(3) + quat(4) + linvel(3) + angvel(3) + goal_pos_delta(3) = 16."""
   cmd, _, obj, _, _ = _idx(env, command_name)
-  pos_delta = cmd.ref_obj_pos - obj.data.root_link_pos_w
+  pos_delta = cmd.ref_obj_pos - cmd.obj_pos
   return torch.cat(
     [
       pos_delta,
-      obj.data.root_link_quat_w,
-      obj.data.root_link_lin_vel_w,
-      obj.data.root_link_ang_vel_w,
+      cmd.obj_quat,
+      cmd.obj_linvel,
+      cmd.obj_angvel,
       pos_delta,  # DexTrack repeats the goal pos delta
     ],
     dim=-1,

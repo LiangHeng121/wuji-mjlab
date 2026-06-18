@@ -130,3 +130,49 @@ def wuji_hand_cubesmall_multi_tracking_env_cfg(
     object_name="cubesmall", play=play, num_envs=num_envs, action_mode=action_mode,
     obs_mode=obs_mode, scale_rewards_by_dt=scale_rewards_by_dt,
     finger_kp_scale=finger_kp_scale, reward_mode=reward_mode)
+
+
+# ----- multi-OBJECT generalist: cubesmall + cup + apple together ---------------
+def wuji_hand_3obj_multi_tracking_env_cfg(
+  play: bool = False, num_envs: int = 4096,
+  action_mode: str = "wdelta", obs_mode: str = "full",
+  scale_rewards_by_dt: bool = False, finger_kp_scale: float = 1.0,
+  reward_mode: str = "cgsmooth_b2_softclip",
+) -> ManagerBasedRlEnvCfg:
+  """3-object generalist (cubesmall+cup+apple). All 3 object meshes live in EVERY
+  env; per env the sequence's object is active and the other 2 are parked far away
+  (mujoco-warp shares one compiled model -> can't swap mesh per env). Object identity
+  reaches the policy via the per-seq 256-d obj latent. NOTE: pure multi-object RL is
+  known-hard (DexTrack 3obj fair ~ -30); the scalable path is specialist+distillation."""
+  objs = ["cubesmall", "cup", "apple"]
+  # 3 objects per env (cup is multi-hull CoACD) -> far more contacts/constraints
+  # than the single-object 96/512 (observed ncon >= 248). Bump the buffers.
+  cfg = make_tracking_env_cfg(
+    num_envs=num_envs, action_mode=action_mode, obs_mode=obs_mode,
+    scale_rewards_by_dt=scale_rewards_by_dt, reward_mode=reward_mode,
+    nconmax=384, njmax=1536,
+  )
+  ents = {"robot": get_wuji_fly_hand_cfg(finger_kp_scale=finger_kp_scale)}
+  for j, o in enumerate(objs):  # distinct spawn pos so they don't overlap pre-reset
+    ents[f"object_{o}"] = get_grab_object_cfg(o, init_pos=(10.0 + 2.0 * j, 0.0, 0.1))
+  cfg.scene.entities = ents
+
+  motion, contact, seq_obj = [], [], []
+  for j, o in enumerate(objs):
+    for s in _object_sequences(o):
+      motion.append(str(_MOTION_DIR / f"wuji_passive_active_info_{s}_nf_300.npy"))
+      contact.append(str(_CONTACT_DIR / f"{s}_contact.npy"))
+      seq_obj.append(j)
+  m = cfg.commands["motion"]
+  m.motion_files = tuple(motion)
+  m.object_entity_names = tuple(f"object_{o}" for o in objs)
+  m.seq_object_idx = tuple(seq_obj)
+  m.obj_latent_file = _OBJ_LATENT_FILE
+  if reward_mode == "cgsmooth_b2_softclip":
+    m.contact_files = tuple(contact)
+  cfg.viewer.body_name = "right_palm_link"
+
+  if play:
+    cfg.scene.num_envs = 4
+    cfg.observations["policy"].enable_corruption = False
+  return cfg

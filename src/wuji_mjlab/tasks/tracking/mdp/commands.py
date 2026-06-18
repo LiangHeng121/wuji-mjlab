@@ -44,7 +44,20 @@ class HandObjectMotionCommand(CommandTerm):
     super().__init__(cfg, env)
 
     self.robot: Entity = env.scene[cfg.hand_entity_name]
-    self.obj: Entity = env.scene[cfg.object_entity_name]
+    # Object(s). Single-object: one entity. Multi-object generalist: several
+    # entities (one per object type) ALL present in every env -- per env, ONE is
+    # "active" (matches that env's sequence's object) and the others are parked far
+    # away (mujoco-warp shares one compiled model across envs, so we can't swap the
+    # mesh per env; we put every object in every env and activate one).
+    self.multi_obj = bool(cfg.object_entity_names)
+    if self.multi_obj:
+      self.objs: list[Entity] = [env.scene[n] for n in cfg.object_entity_names]
+      self.num_objs = len(self.objs)
+      self.obj: Entity = self.objs[0]  # for cfg compatibility
+    else:
+      self.obj = env.scene[cfg.object_entity_name]
+      self.objs = [self.obj]
+      self.num_objs = 1
 
     # Sequence list: multi-trajectory generalist if motion_files is given, else a
     # single sequence (motion_file). All tensors are stacked (S, T, ...) and each
@@ -116,11 +129,27 @@ class HandObjectMotionCommand(CommandTerm):
       self._contact_flag = None
       self._contact_local = None
 
+    # Per-sequence object index (multi-object): which object entity each sequence
+    # uses. Single-object -> all zeros.
+    if self.multi_obj:
+      so = np.asarray(cfg.seq_object_idx, dtype=np.int64)
+      if so.shape[0] != self.num_seqs:
+        raise ValueError(f"seq_object_idx ({so.shape[0]}) != num_seqs ({self.num_seqs})")
+      self.seq_obj = torch.tensor(so, device=self.device)
+    else:
+      self.seq_obj = torch.zeros(self.num_seqs, dtype=torch.long, device=self.device)
+    # Parked pose per slot: x = 10 + 2j on the floor (env-local), far from the hand.
+    self._park = torch.tensor(
+      [[10.0 + 2.0 * j, 0.0, 0.1, 1.0, 0.0, 0.0, 0.0] for j in range(self.num_objs)],
+      device=self.device,
+    )  # (num_objs, 7) pos(3)+quat(4)
+
     self.time_steps = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
     # Per-env sequence assignment (random; resampled on episode reset).
     self.env_seq = torch.randint(
       0, self.num_seqs, (self.num_envs,), device=self.device, dtype=torch.long
     )
+    self.env_obj = self.seq_obj[self.env_seq]  # per-env active object index
 
     self.metrics["error_joint_pos"] = torch.zeros(self.num_envs, device=self.device)
     self.metrics["error_obj_pos"] = torch.zeros(self.num_envs, device=self.device)
@@ -176,6 +205,31 @@ class HandObjectMotionCommand(CommandTerm):
   def has_contact(self) -> bool:
     return self._contact_flag is not None
 
+  # -- active object state (per env; single-object = the one entity) -----------
+
+  def _active(self, attr: str) -> torch.Tensor:
+    if not self.multi_obj:
+      return getattr(self.obj.data, attr)
+    stacked = torch.stack([getattr(o.data, attr) for o in self.objs], dim=0)  # (J,E,..)
+    e = torch.arange(self.num_envs, device=self.device)
+    return stacked[self.env_obj, e]
+
+  @property
+  def obj_pos(self) -> torch.Tensor:
+    return self._active("root_link_pos_w")
+
+  @property
+  def obj_quat(self) -> torch.Tensor:
+    return self._active("root_link_quat_w")
+
+  @property
+  def obj_linvel(self) -> torch.Tensor:
+    return self._active("root_link_lin_vel_w")
+
+  @property
+  def obj_angvel(self) -> torch.Tensor:
+    return self._active("root_link_ang_vel_w")
+
   @property
   def command(self) -> torch.Tensor:
     # What the policy sees as the goal: the target joint pose.
@@ -188,7 +242,7 @@ class HandObjectMotionCommand(CommandTerm):
       self.ref_qpos - self.robot.data.joint_pos, dim=-1
     )
     self.metrics["error_obj_pos"] = torch.norm(
-      self.ref_obj_pos - self.obj.data.root_link_pos_w, dim=-1
+      self.ref_obj_pos - self.obj_pos, dim=-1
     )
 
   def _resample_command(self, env_ids: torch.Tensor) -> None:
@@ -198,6 +252,7 @@ class HandObjectMotionCommand(CommandTerm):
       self.env_seq[env_ids] = torch.randint(
         0, self.num_seqs, (len(env_ids),), device=self.device, dtype=torch.long
       )
+    self.env_obj[env_ids] = self.seq_obj[self.env_seq[env_ids]]
     s = self.env_seq[env_ids]
     t = self.time_steps[env_ids]
 
@@ -209,14 +264,20 @@ class HandObjectMotionCommand(CommandTerm):
     self.robot.write_joint_state_to_sim(jp, jv, env_ids=env_ids)
     self.robot.reset(env_ids=env_ids)
 
-    # Write object freejoint = reference object pose (zero velocity).
-    # Env-local frame: no env_origins (see ref_obj_pos note).
-    pos = self._ref_obj_pos[s, t]
-    quat = self._ref_obj_quat[s, t]
+    # Object freejoint(s). Env-local frame: no env_origins (see ref_obj_pos note).
+    # Active object -> reference pose; inactive objects -> parked far away. For
+    # multi-object each slot is written for all reset envs (ref where active, park
+    # where not). Zero velocity.
+    ref_pos = self._ref_obj_pos[s, t]
+    ref_quat = self._ref_obj_quat[s, t]
+    active = self.env_obj[env_ids]  # (n,) which slot is active per reset env
     vel = torch.zeros(len(env_ids), 6, device=self.device)
-    root_state = torch.cat([pos, quat, vel], dim=-1)
-    self.obj.write_root_state_to_sim(root_state, env_ids=env_ids)
-    self.obj.reset(env_ids=env_ids)
+    for j, obj in enumerate(self.objs):
+      is_active = (active == j).unsqueeze(-1)  # (n,1)
+      pos = torch.where(is_active, ref_pos, self._park[j, :3].unsqueeze(0))
+      quat = torch.where(is_active, ref_quat, self._park[j, 3:].unsqueeze(0))
+      obj.write_root_state_to_sim(torch.cat([pos, quat, vel], dim=-1), env_ids=env_ids)
+      obj.reset(env_ids=env_ids)
 
   def _update_command(self) -> None:
     self.time_steps += 1
@@ -230,7 +291,9 @@ class HandObjectMotionCommandCfg(CommandTermCfg):
   motion_file: str = ""  # single-sequence (ignored if motion_files is set)
   motion_files: tuple[str, ...] = ()  # multi-sequence generalist (per-env assignment)
   hand_entity_name: str = "robot"
-  object_entity_name: str = "object"
+  object_entity_name: str = "object"  # single-object mode
+  object_entity_names: tuple[str, ...] = ()  # multi-object: one entity per obj type
+  seq_object_idx: tuple[int, ...] = ()  # per-seq object slot (aligned w/ motion_files)
   obj_latent_file: str = ""  # obj_type_to_obj_feat.npy (DexTrack w_obj_latent_features)
   contact_file: str = ""  # single-seq contact_grab2/<seq>_contact.npy (B2)
   contact_files: tuple[str, ...] = ()  # multi-seq contact, aligned 1:1 with motion_files

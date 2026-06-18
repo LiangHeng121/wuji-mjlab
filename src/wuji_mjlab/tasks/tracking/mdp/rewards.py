@@ -38,7 +38,6 @@ def _hand_points(env, command_name: str):
   """Shared lookups: command, robot, sim fingertip (E,5,3) + palm (E,3), obj (E,3)."""
   cmd = env.command_manager.get_term(command_name)
   robot = env.scene[cmd.cfg.hand_entity_name]
-  obj = env.scene[cmd.cfg.object_entity_name]
 
   cache = getattr(env, "_grasp_idx", None)
   if cache is None:
@@ -50,7 +49,7 @@ def _hand_points(env, command_name: str):
 
   sim_tips = robot.data.site_pos_w[:, tip_idx]  # (E,5,3)
   sim_palm = robot.data.body_link_pos_w[:, palm_idx]  # (E,3)
-  obj_pos = obj.data.root_link_pos_w  # (E,3)
+  obj_pos = cmd.obj_pos  # (E,3) active object (multi-object aware)
   return cmd, robot, sim_tips, sim_palm, obj_pos
 
 
@@ -178,8 +177,7 @@ def contact_guide(env, command_name: str = "motion", beta: float = 8.0) -> torch
     cg_value = sum_f flag_f * exp(-beta * d_f) / (sum_f flag_f + 1e-6)
   """
   cmd, _, sim_tips, _, obj_pos = _hand_points(env, command_name)
-  obj = env.scene[cmd.cfg.object_entity_name]
-  obj_quat = obj.data.root_link_quat_w  # (E,4) wxyz
+  obj_quat = cmd.obj_quat  # (E,4) wxyz active object (multi-object aware)
   local = cmd.ref_contact_local  # (E,5,3) object-local
   # world contact point = obj_pos + R(obj_quat) @ local, per finger.
   q = obj_quat.unsqueeze(1).expand(-1, 5, -1).reshape(-1, 4)
