@@ -217,6 +217,11 @@ def make_tracking_env_cfg(
 
   terminations: dict[str, TerminationTermCfg] = {
     "time_out": TerminationTermCfg(func=mdp.time_out, time_out=True),
+    # Reset (not time-out) envs whose object/hand blew up -> robust to rare contact
+    # explosions at scale that would otherwise NaN the obs and kill the whole run.
+    "unstable": TerminationTermCfg(
+      func=mdp.object_unstable, params={"command_name": "motion"}
+    ),
   }
 
   ##

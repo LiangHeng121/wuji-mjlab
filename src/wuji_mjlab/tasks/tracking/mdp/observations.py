@@ -19,6 +19,27 @@ import torch
 
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 
+
+# --- terminations ---------------------------------------------------------
+
+def object_unstable(
+  env, command_name: str = "motion", max_pos: float = 3.0, max_vel: float = 80.0
+) -> torch.Tensor:
+  """Reset envs whose active object or hand state has gone NaN / out of bounds.
+
+  Rare physics blowups (a finger clipping an object -> huge contact force) at scale
+  produce NaN that would otherwise trip mjlab's strict obs-NaN assert and kill the
+  WHOLE run. Terminating those envs runs BEFORE reward/obs, so they reset to a clean
+  reference state and the obs stays finite (Isaac Gym / DexTrack tolerate blowups the
+  same way via reset). Returns (E,) bool."""
+  cmd = env.command_manager.get_term(command_name)
+  robot = env.scene[cmd.cfg.hand_entity_name]
+  p, v = cmd.obj_pos, cmd.obj_linvel
+  qv = robot.data.joint_vel
+  bad = (torch.isnan(p).any(-1) | torch.isnan(v).any(-1) | torch.isnan(qv).any(-1)
+         | (p.abs() > max_pos).any(-1) | (v.abs() > max_vel).any(-1))
+  return bad
+
 # --- simple obs (the successful baseline) ---------------------------------
 
 
