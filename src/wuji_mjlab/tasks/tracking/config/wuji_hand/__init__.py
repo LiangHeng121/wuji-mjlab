@@ -149,6 +149,19 @@ register_mjlab_task(
   runner_cls=WujiOnPolicyRunner,
 )
 
+# ----- contact-gated cgsmooth_b2_softclip, single-object: cubesmall + apple -----
+for _oid, _obj in (("Cubesmall", "cubesmall"), ("Apple", "apple")):
+  register_mjlab_task(
+    task_id=f"WujiHand_Tracking_{_oid}Multi_CGSmooth_Contact",
+    env_cfg=wuji_hand_multi_tracking_env_cfg(
+      object_name=_obj, num_envs=4096, reward_mode="cgsmooth_b2_softclip_contact"),
+    play_env_cfg=wuji_hand_multi_tracking_env_cfg(
+      object_name=_obj, play=True, reward_mode="cgsmooth_b2_softclip_contact"),
+    rl_cfg=wuji_hand_tracking_ppo_runner_cfg(
+      run_name=f"Tracking_{_oid}Multi_CGSmooth_Contact", max_iterations=10000),
+    runner_cls=WujiOnPolicyRunner,
+  )
+
 # ----- multi-OBJECT generalist: cubesmall + cup + apple (cgsmooth_b2_softclip) --
 register_mjlab_task(
   task_id="WujiHand_Tracking_3Obj_CGSmooth",
@@ -156,5 +169,17 @@ register_mjlab_task(
   play_env_cfg=wuji_hand_3obj_multi_tracking_env_cfg(play=True),
   rl_cfg=wuji_hand_tracking_ppo_runner_cfg(
     run_name="Tracking_3Obj_CGSmooth", max_iterations=10000),
+  runner_cls=WujiOnPolicyRunner,
+)
+
+# 3-object generalist, contact-gated grasp.
+register_mjlab_task(
+  task_id="WujiHand_Tracking_3Obj_CGSmooth_Contact",
+  env_cfg=wuji_hand_3obj_multi_tracking_env_cfg(
+    num_envs=4096, reward_mode="cgsmooth_b2_softclip_contact"),
+  play_env_cfg=wuji_hand_3obj_multi_tracking_env_cfg(
+    play=True, reward_mode="cgsmooth_b2_softclip_contact"),
+  rl_cfg=wuji_hand_tracking_ppo_runner_cfg(
+    run_name="Tracking_3Obj_CGSmooth_Contact", max_iterations=10000),
   runner_cls=WujiOnPolicyRunner,
 )
