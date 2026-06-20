@@ -189,8 +189,10 @@ def fair_reward_metric(env, command_name: str = "motion") -> torch.Tensor:
   hp = hand_pose_tracking(env, command_name, 0.6, 0.1, 0.1)
   fo = finger_object_distance(env, command_name, palm_dist_rew_w=2.0,
                               grip_thres=0.22, n_finger_sum=4)
-  op = object_pos_tracking(env, command_name, grip_thres=0.22, n_finger_sum=4)
-  ib = object_inplace_bonus(env, command_name, grip_thres=0.22, n_finger_sum=4)
+  op = object_pos_tracking(env, command_name, grip_thres=0.22, n_finger_sum=4,
+                           grasp_mode="contact")
+  ib = object_inplace_bonus(env, command_name, grip_thres=0.22, n_finger_sum=4,
+                            grasp_mode="contact")
   fair = 0.5 * hp + 0.3 * fo + 1.0 * op + 1.0 * ib
   fair = torch.nan_to_num(fair, nan=0.0, posinf=0.0, neginf=0.0)  # blown-up envs
 
