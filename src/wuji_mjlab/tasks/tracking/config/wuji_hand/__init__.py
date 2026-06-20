@@ -134,6 +134,21 @@ register_mjlab_task(
   runner_cls=WujiOnPolicyRunner,
 )
 
+# ----- cup direction 1: contact-gated grasp (require >=2 fingers REALLY touching
+# the cup for object-track/bonus credit; distance flag fires on floor-hover, ~45%
+# of cup's bonus was loose-contact). kp x1, same cgsmooth recipe otherwise.
+register_mjlab_task(
+  task_id="WujiHand_Tracking_CupMulti_CGSmooth_Contact",
+  env_cfg=wuji_hand_multi_tracking_env_cfg(
+    object_name="cup", num_envs=4096,
+    reward_mode="cgsmooth_b2_softclip_contact"),
+  play_env_cfg=wuji_hand_multi_tracking_env_cfg(
+    object_name="cup", play=True, reward_mode="cgsmooth_b2_softclip_contact"),
+  rl_cfg=wuji_hand_tracking_ppo_runner_cfg(
+    run_name="Tracking_CupMulti_CGSmooth_Contact", max_iterations=10000),
+  runner_cls=WujiOnPolicyRunner,
+)
+
 # ----- multi-OBJECT generalist: cubesmall + cup + apple (cgsmooth_b2_softclip) --
 register_mjlab_task(
   task_id="WujiHand_Tracking_3Obj_CGSmooth",

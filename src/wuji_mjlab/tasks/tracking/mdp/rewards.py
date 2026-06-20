@@ -95,23 +95,70 @@ def finger_object_distance(
   return -(finger_dist + palm_dist_rew_w * palm_dist)
 
 
+def n_finger_contacts(env, command_name: str = "motion") -> torch.Tensor:
+  """(E,) number of distinct fingers in REAL contact with the active object.
+  Reads mujoco-warp contact pairs (finger collision geom <-> object collision geom,
+  penetrating). Used for the contact-gated grasp (distance flag fires even when the
+  hand only hovers near the object -- contact requires actual touching)."""
+  cmd = env.command_manager.get_term(command_name)
+  cache = getattr(env, "_fcontact_ids", None)
+  if cache is None:
+    mjm = env.sim._mj_model
+    gn = [mjm.geom(i).name for i in range(mjm.ngeom)]
+    gb = [mjm.body(mjm.geom_bodyid[i]).name for i in range(mjm.ngeom)]
+    objm = torch.zeros(mjm.ngeom, dtype=torch.bool, device=env.device)
+    fmap = torch.full((mjm.ngeom,), -1, dtype=torch.long, device=env.device)
+    for i in range(mjm.ngeom):
+      if "object" in gb[i].lower() and mjm.geom_conaffinity[i] > 0:
+        objm[i] = True
+      if "finger" in gn[i].lower() and "_col" in gn[i]:
+        fmap[i] = int(gn[i].lower().split("finger")[1][0]) - 1
+    cache = (objm, fmap)
+    env._fcontact_ids = cache
+  objm, fmap = cache
+  c = env.sim.data.contact
+  g = c.geom.long()
+  wid = c.worldid.long()
+  g0, g1 = g[:, 0], g[:, 1]
+  f0, f1 = fmap[g0], fmap[g1]
+  pair = ((f0 >= 0) & objm[g1]) | ((f1 >= 0) & objm[g0])
+  act = (c.dist < 0.004) & pair & (wid >= 0)
+  fi = torch.where(f0 >= 0, f0, f1)
+  res = torch.zeros((env.num_envs, 5), dtype=torch.bool, device=env.device)
+  if bool(act.any()):
+    res[wid[act], fi[act]] = True
+  return res.sum(-1)
+
+
+def _grasp_gate(env, command_name, flag, grasp_mode, min_contacts):
+  """Grasp gate (E,) bool. 'distance' -> flag==2; 'contact' -> >=min_contacts fingers
+  actually touching the object (so floor-hovering without a real grip gets no credit)."""
+  if grasp_mode == "contact":
+    return n_finger_contacts(env, command_name) >= min_contacts
+  return flag == 2
+
+
 def object_pos_tracking(
-  env, command_name: str = "motion", grip_thres: float = 0.22, n_finger_sum: int = 5
+  env, command_name: str = "motion", grip_thres: float = 0.22, n_finger_sum: int = 5,
+  grasp_mode: str = "distance", min_contacts: int = 2,
 ) -> torch.Tensor:
-  """-2*goal_dist, only when grasping (flag==2)."""
+  """-2*goal_dist, only when grasping."""
   _, _, flag, goal_dist = _grasp_geometry(env, command_name, grip_thres, n_finger_sum)
-  return torch.where(flag == 2, -2.0 * goal_dist, torch.zeros_like(goal_dist))
+  gate = _grasp_gate(env, command_name, flag, grasp_mode, min_contacts)
+  return torch.where(gate, -2.0 * goal_dist, torch.zeros_like(goal_dist))
 
 
 def object_inplace_bonus(
-  env, command_name: str = "motion", grip_thres: float = 0.22, n_finger_sum: int = 5
+  env, command_name: str = "motion", grip_thres: float = 0.22, n_finger_sum: int = 5,
+  grasp_mode: str = "distance", min_contacts: int = 2,
 ) -> torch.Tensor:
-  """+1/(1+10*goal_dist) if goal_dist<=0.05 and grasping (flag==2)."""
+  """+1/(1+10*goal_dist) if goal_dist<=0.05 and grasping."""
   _, _, flag, goal_dist = _grasp_geometry(env, command_name, grip_thres, n_finger_sum)
+  gate = _grasp_gate(env, command_name, flag, grasp_mode, min_contacts)
   b = torch.where(
     goal_dist <= 0.05, 1.0 / (1.0 + 10.0 * goal_dist), torch.zeros_like(goal_dist)
   )
-  return torch.where(flag == 2, b, torch.zeros_like(goal_dist))
+  return torch.where(gate, b, torch.zeros_like(goal_dist))
 
 
 def finger_pos_tracking(env, command_name: str = "motion") -> torch.Tensor:

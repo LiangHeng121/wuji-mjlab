@@ -51,7 +51,13 @@ def make_tracking_env_cfg(
       FIX_FINGER5 (5 fingers) + FINGER_POS_REW(1.0) + PALM_POS_REW(1.0).
     - "cgsmooth_b2_softclip": pinall3 + contact_guide(B2, beta=8) + HAND_EMA(0.4,
       in the action) + action_rate(0.0005) + soft_joint_limit(0.5).
+    - "<base>_contact": as <base> but the object grasp is gated on REAL finger
+      contact (>=2 fingers touching) instead of palm/finger distance.
   """
+  # Strip the "_contact" grasp-gating suffix up front so the HAND_EMA / reward-term
+  # checks below see the base reward_mode; grasp_mode threads into the obj terms.
+  grasp_mode = "contact" if reward_mode.endswith("_contact") else "distance"
+  reward_mode = reward_mode[: -len("_contact")] if grasp_mode == "contact" else reward_mode
 
   ##
   # Observations
@@ -154,6 +160,8 @@ def make_tracking_env_cfg(
 
   # DexTrack reward lineage, selected by reward_mode (weights = DexTrack coefs;
   # funcs return the signed reward so weights are positive coef magnitudes).
+  # grasp_mode (distance vs real-contact) was parsed from the "_contact" suffix at
+  # the top of this function.
   if reward_mode == "original":
     # base: tighter palm grip (0.12), 4-finger sum, palm-distance penalty ON.
     grip, n_sum, palm_w = 0.12, 4, 2.0
@@ -173,15 +181,17 @@ def make_tracking_env_cfg(
       params={"command_name": "motion", "palm_dist_rew_w": palm_w,
               "grip_thres": grip, "n_finger_sum": n_sum},
     ),
-    "object_pos_tracking": RewardTermCfg(  # goal_hand_rew, gated by grasp flag
+    "object_pos_tracking": RewardTermCfg(  # goal_hand_rew, gated by grasp
       func=mdp.object_pos_tracking,
       weight=1.0,
-      params={"command_name": "motion", "grip_thres": grip, "n_finger_sum": n_sum},
+      params={"command_name": "motion", "grip_thres": grip, "n_finger_sum": n_sum,
+              "grasp_mode": grasp_mode},
     ),
-    "object_inplace_bonus": RewardTermCfg(  # in-place bonus, gated by grasp flag
+    "object_inplace_bonus": RewardTermCfg(  # in-place bonus, gated by grasp
       func=mdp.object_inplace_bonus,
       weight=1.0,
-      params={"command_name": "motion", "grip_thres": grip, "n_finger_sum": n_sum},
+      params={"command_name": "motion", "grip_thres": grip, "n_finger_sum": n_sum,
+              "grasp_mode": grasp_mode},
     ),
   }
 

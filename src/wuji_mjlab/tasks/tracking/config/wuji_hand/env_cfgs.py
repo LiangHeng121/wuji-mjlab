@@ -46,7 +46,7 @@ def wuji_hand_cubesmall_tracking_env_cfg(
   }
   cfg.commands["motion"].motion_file = _MOTION_FILE
   cfg.commands["motion"].obj_latent_file = _OBJ_LATENT_FILE
-  if reward_mode == "cgsmooth_b2_softclip":  # only this mode needs contact data
+  if reward_mode.startswith("cgsmooth_b2_softclip"):  # only this mode needs contact data
     cfg.commands["motion"].contact_file = _CONTACT_FILE
   cfg.viewer.body_name = "right_palm_link"
 
@@ -113,7 +113,7 @@ def wuji_hand_multi_tracking_env_cfg(
   cfg.commands["motion"].motion_files = tuple(
     str(_MOTION_DIR / f"wuji_passive_active_info_{s}_nf_300.npy") for s in seqs)
   cfg.commands["motion"].obj_latent_file = _OBJ_LATENT_FILE
-  if reward_mode == "cgsmooth_b2_softclip":
+  if reward_mode.startswith("cgsmooth_b2_softclip"):
     cfg.commands["motion"].contact_files = tuple(
       str(_CONTACT_DIR / f"{s}_contact.npy") for s in seqs)
   cfg.viewer.body_name = "right_palm_link"
@@ -174,7 +174,7 @@ def wuji_hand_3obj_multi_tracking_env_cfg(
   m.object_entity_names = tuple(f"object_{o}" for o in objs)
   m.seq_object_idx = tuple(seq_obj)
   m.obj_latent_file = _OBJ_LATENT_FILE
-  if reward_mode == "cgsmooth_b2_softclip":
+  if reward_mode.startswith("cgsmooth_b2_softclip"):
     m.contact_files = tuple(contact)
   cfg.viewer.body_name = "right_palm_link"
 
