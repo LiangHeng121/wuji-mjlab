@@ -96,10 +96,12 @@ def wuji_hand_multi_tracking_env_cfg(
   action_mode: str = "wdelta", obs_mode: str = "full",
   scale_rewards_by_dt: bool = False, finger_kp_scale: float = 1.0,
   reward_mode: str = "cgsmooth_b2_softclip", extra_exclude: tuple[str, ...] = (),
+  only_seq: str | None = None,
 ) -> ManagerBasedRlEnvCfg:
   """Single-object multi-sequence generalist over all sequences of ``object_name``
   (NO offhand). Each env gets a random sequence, resampled on reset. cup is concave
-  -> CoACD; apple/cubesmall near-convex -> single hull (handled in grab_object_cfg)."""
+  -> CoACD; apple/cubesmall near-convex -> single hull (handled in grab_object_cfg).
+  only_seq: if set, train on just that ONE sequence (single-trajectory specialist)."""
   cfg = make_tracking_env_cfg(
     num_envs=num_envs, action_mode=action_mode, obs_mode=obs_mode,
     scale_rewards_by_dt=scale_rewards_by_dt, reward_mode=reward_mode,
@@ -109,7 +111,7 @@ def wuji_hand_multi_tracking_env_cfg(
     "object": get_grab_object_cfg(
       object_name, convex_hull=(object_name in _CONVEX_HULL_OBJS)),
   }
-  seqs = _object_sequences(object_name, extra_exclude)
+  seqs = [only_seq] if only_seq else _object_sequences(object_name, extra_exclude)
   cfg.commands["motion"].motion_files = tuple(
     str(_MOTION_DIR / f"wuji_passive_active_info_{s}_nf_300.npy") for s in seqs)
   cfg.commands["motion"].obj_latent_file = _OBJ_LATENT_FILE

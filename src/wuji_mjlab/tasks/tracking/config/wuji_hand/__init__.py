@@ -162,6 +162,24 @@ for _oid, _obj in (("Cubesmall", "cubesmall"), ("Apple", "apple")):
     runner_cls=WujiOnPolicyRunner,
   )
 
+# ----- single-sequence specialists (contact-gated, kp x1): cup + apple lift -----
+for _oid, _obj, _seq in (
+  ("Cup", "cup", "ori_grab_s8_cup_lift"),
+  ("Apple", "apple", "ori_grab_s2_apple_lift"),
+):
+  register_mjlab_task(
+    task_id=f"WujiHand_Tracking_{_oid}Single_CGSmooth_Contact",
+    env_cfg=wuji_hand_multi_tracking_env_cfg(
+      object_name=_obj, num_envs=4096,
+      reward_mode="cgsmooth_b2_softclip_contact", only_seq=_seq),
+    play_env_cfg=wuji_hand_multi_tracking_env_cfg(
+      object_name=_obj, play=True,
+      reward_mode="cgsmooth_b2_softclip_contact", only_seq=_seq),
+    rl_cfg=wuji_hand_tracking_ppo_runner_cfg(
+      run_name=f"Tracking_{_oid}Single_CGSmooth_Contact", max_iterations=10000),
+    runner_cls=WujiOnPolicyRunner,
+  )
+
 # ----- multi-OBJECT generalist: cubesmall + cup + apple (cgsmooth_b2_softclip) --
 register_mjlab_task(
   task_id="WujiHand_Tracking_3Obj_CGSmooth",
