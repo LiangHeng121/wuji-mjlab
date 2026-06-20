@@ -63,11 +63,12 @@ def make_locked_resample(idx: int):
   return _resample
 
 
-# Pick spread-out sequence indices for variety.
+# Sequence names from the command's motion files (object-agnostic: cup/apple/3obj).
+import os
+names = [os.path.basename(m).replace("wuji_passive_active_info_", "").replace("_nf_300.npy", "")
+         for m in cmd.cfg.motion_files]
 nseq = cmd.num_seqs
 idxs = sorted(set(int(round(i)) for i in np.linspace(0, nseq - 1, N_SEQS)))
-from wuji_mjlab.tasks.tracking.config.wuji_hand.env_cfgs import _cubesmall_sequences
-names = _cubesmall_sequences()
 
 for k in idxs:
   cmd._resample_command = types.MethodType(make_locked_resample(k), cmd)

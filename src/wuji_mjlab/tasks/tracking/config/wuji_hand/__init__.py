@@ -118,6 +118,22 @@ for _oid, _obj, _excl in (
     runner_cls=WujiOnPolicyRunner,
   )
 
+# ----- cup grip-strength experiment: kp x8 (direction 2 -- heavier object needs
+# more finger force to actually lift off the floor; kp x1 fingers touch the cup
+# but can't bear its 97g weight). Same cgsmooth recipe otherwise.
+register_mjlab_task(
+  task_id="WujiHand_Tracking_CupMulti_CGSmooth_Kp8",
+  env_cfg=wuji_hand_multi_tracking_env_cfg(
+    object_name="cup", num_envs=4096, reward_mode="cgsmooth_b2_softclip",
+    finger_kp_scale=8.0),
+  play_env_cfg=wuji_hand_multi_tracking_env_cfg(
+    object_name="cup", play=True, reward_mode="cgsmooth_b2_softclip",
+    finger_kp_scale=8.0),
+  rl_cfg=wuji_hand_tracking_ppo_runner_cfg(
+    run_name="Tracking_CupMulti_CGSmooth_Kp8", max_iterations=10000),
+  runner_cls=WujiOnPolicyRunner,
+)
+
 # ----- multi-OBJECT generalist: cubesmall + cup + apple (cgsmooth_b2_softclip) --
 register_mjlab_task(
   task_id="WujiHand_Tracking_3Obj_CGSmooth",
