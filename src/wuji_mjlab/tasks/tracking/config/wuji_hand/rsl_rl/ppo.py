@@ -53,7 +53,7 @@ def wuji_hand_tracking_ppo_runner_cfg(
     logger="wandb",
     wandb_project="wuji_tracking_mjlab",
     run_name=run_name,
-    save_interval=50,
+    save_interval=250,  # net-v4 ckpt ~0.2-1GB; 50 filled the 3.6T disk -> all-jobs-crash
     num_steps_per_env=32,            # horizon_length=32
     max_iterations=max_iterations,
   )
