@@ -8,6 +8,7 @@ from wuji_mjlab.rl.runner import WujiOnPolicyRunner
 
 from .env_cfgs import (
   wuji_hand_3obj_multi_tracking_env_cfg,
+  wuji_hand_3obj_swap_tracking_env_cfg,
   wuji_hand_cubesmall_multi_tracking_env_cfg,
   wuji_hand_cubesmall_tracking_env_cfg,
   wuji_hand_multi_tracking_env_cfg,
@@ -162,6 +163,24 @@ for _oid, _obj in (("Cubesmall", "cubesmall"), ("Apple", "apple")):
     runner_cls=WujiOnPolicyRunner,
   )
 
+# ----- apple grip-strength ABLATION: kp x8 + contact-gated. Identical to the
+# apple contact specialist above EXCEPT finger_kp_scale 1->8 (the ONLY variable).
+# Does more finger force help apple lift? The doc says kp x1 suffices (3obj proved
+# it), but verify directly on the single-object apple specialist. Run at the same
+# env count as the apple contact specialist (~23000) to isolate kp.
+register_mjlab_task(
+  task_id="WujiHand_Tracking_AppleMulti_CGSmooth_Contact_Kp8",
+  env_cfg=wuji_hand_multi_tracking_env_cfg(
+    object_name="apple", num_envs=4096,
+    reward_mode="cgsmooth_b2_softclip_contact", finger_kp_scale=8.0),
+  play_env_cfg=wuji_hand_multi_tracking_env_cfg(
+    object_name="apple", play=True,
+    reward_mode="cgsmooth_b2_softclip_contact", finger_kp_scale=8.0),
+  rl_cfg=wuji_hand_tracking_ppo_runner_cfg(
+    run_name="Tracking_AppleMulti_CGSmooth_Contact_Kp8", max_iterations=10000),
+  runner_cls=WujiOnPolicyRunner,
+)
+
 # ----- single-sequence specialists (contact-gated, kp x1): cup + apple lift -----
 for _oid, _obj, _seq in (
   ("Cup", "cup", "ori_grab_s8_cup_lift"),
@@ -199,5 +218,19 @@ register_mjlab_task(
     play=True, reward_mode="cgsmooth_b2_softclip_contact"),
   rl_cfg=wuji_hand_tracking_ppo_runner_cfg(
     run_name="Tracking_3Obj_CGSmooth_Contact", max_iterations=10000),
+  runner_cls=WujiOnPolicyRunner,
+)
+
+# 3-object generalist, PATH-(c) per-world geom_dataid SWAP (single object body,
+# mesh swapped per-world instead of 3 bodies + park). Same contact-gated recipe;
+# single-object contact buffers. Compare against the park version above.
+register_mjlab_task(
+  task_id="WujiHand_Tracking_3Obj_CGSmooth_Contact_Swap",
+  env_cfg=wuji_hand_3obj_swap_tracking_env_cfg(
+    num_envs=4096, reward_mode="cgsmooth_b2_softclip_contact"),
+  play_env_cfg=wuji_hand_3obj_swap_tracking_env_cfg(
+    play=True, reward_mode="cgsmooth_b2_softclip_contact"),
+  rl_cfg=wuji_hand_tracking_ppo_runner_cfg(
+    run_name="Tracking_3Obj_CGSmooth_Contact_Swap", max_iterations=10000),
   runner_cls=WujiOnPolicyRunner,
 )

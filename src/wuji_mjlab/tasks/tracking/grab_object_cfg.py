@@ -26,7 +26,7 @@ import trimesh
 from mjlab.entity import EntityCfg
 
 GRAB_MESH_DIR = Path(
-  "/home/liangh/DexTrack/GRAB/unzipped/tools/object_meshes/contact_meshes"
+  "/data/home/liangheng/DexTrack/GRAB/unzipped/tools/object_meshes/contact_meshes"
 )
 GRAB_SCALE = 1.25
 # DexTrack/Isaac Gym used a uniform rigid_obj_density=500 for ALL objects (not
@@ -141,6 +141,124 @@ def _set_true_inertial(body, tm: trimesh.Trimesh, density: float) -> None:
   body.iquat = quat.tolist()
   body.inertia = np.clip(evals, 1e-9, None).tolist()
   body.explicitinertial = True
+
+
+def _obj_phys(name: str, scale: float, density: float) -> dict:
+  """Per-object physical params for a swap slot: compile a 1-body-1-hull reference
+  model (with the SAME explicit true-mesh inertial used in the swap body) and read
+  the collision geom's rbound/aabb + body inertial + the solver invweight constants
+  (dof_invweight0 / body_invweight0 / body_subtreemass). All written per-world for
+  the active object, so broadphase, dynamics AND solver impedance match the swapped
+  mesh -- WITHOUT a global recompute_constants (which would clobber the hand's dofs,
+  since the object is a separate kinematic tree -> block-diagonal mass matrix ->
+  the object's invweight equals this single-object reference's)."""
+  tm = trimesh.load(str(GRAB_MESH_DIR / f"{name}.ply"), force="mesh")
+  tm.apply_scale(scale)
+  hull = tm.convex_hull  # cube is_convex, cup/apple forced single hull -> 1 hull each
+  mass = float(tm.volume * density)
+  com = np.asarray(tm.center_mass, dtype=float)
+  inertia = np.asarray(tm.moment_inertia, dtype=float) * density
+  evals, evecs = np.linalg.eigh(inertia)
+  if np.linalg.det(evecs) < 0:
+    evecs[:, 0] *= -1.0
+  iquat = np.zeros(4)
+  mujoco.mju_mat2Quat(iquat, evecs.flatten())
+  idiag = np.clip(evals, 1e-9, None)
+
+  spec = mujoco.MjSpec()
+  _add_inline_mesh(spec, "h", hull)
+  b = spec.worldbody.add_body()
+  b.add_freejoint()
+  # explicit true-mesh inertial = exactly what the swap body gets per-world, so the
+  # compile-time invweight below is consistent with the per-world mass/inertia write.
+  b.mass = mass
+  b.ipos = com.tolist()
+  b.iquat = iquat.tolist()
+  b.inertia = idiag.tolist()
+  b.explicitinertial = True
+  g = b.add_geom()
+  g.type = mujoco.mjtGeom.mjGEOM_MESH
+  g.meshname = "h"
+  m = spec.compile()  # body 1 = object, geom 0 = hull, dofs 0:6 = free joint
+  return dict(
+    rbound=float(m.geom_rbound[0]),
+    aabb=np.array(m.geom_aabb[0], dtype=np.float32).reshape(2, 3).copy(),
+    mass=mass,
+    idiag=idiag.astype(np.float32),
+    com=com.astype(np.float32),
+    iquat=iquat.astype(np.float32),
+    dof_invweight0=np.array(m.dof_invweight0[:6], dtype=np.float32).copy(),  # (6,)
+    body_invweight0=np.array(m.body_invweight0[1], dtype=np.float32).copy(),  # (2,)
+    subtreemass=float(m.body_subtreemass[1]),
+  )
+
+
+def _build_swap_spec(
+  names: tuple[str, ...], scale: float, density: float,
+  rgba: tuple[float, float, float, float], friction: float | None,
+) -> mujoco.MjSpec:
+  """ONE free body with a single visual + single collision geom, but a mesh pool
+  holding every object's visual + convex-hull mesh. Per-world ``geom_dataid``
+  selects which object each env collides (path-(c) swap, replaces park). All
+  objects are topology-identical (1 visual + 1 hull), required for same-model
+  swap. Body inertial is overwritten per-world at reset."""
+  fric = (friction, _OBJ_FRICTION[1], _OBJ_FRICTION[2]) if friction is not None else _OBJ_FRICTION
+  spec = mujoco.MjSpec()
+  for n in names:
+    tm = trimesh.load(str(GRAB_MESH_DIR / f"{n}.ply"), force="mesh")
+    tm.apply_scale(scale)
+    _add_inline_mesh(spec, f"{n}_visual", tm)
+    _add_inline_mesh(spec, f"{n}_col", tm.convex_hull)
+  body = spec.worldbody.add_body()
+  body.name = "obj"
+  body.add_freejoint()
+  gv = body.add_geom()
+  gv.name = "obj_visual"
+  gv.type = mujoco.mjtGeom.mjGEOM_MESH
+  gv.meshname = f"{names[0]}_visual"
+  gv.group = 2
+  gv.rgba = list(rgba)
+  gv.contype = 0
+  gv.conaffinity = 0
+  gv.density = 0.0
+  gc = body.add_geom()
+  gc.name = "obj_col"
+  gc.type = mujoco.mjtGeom.mjGEOM_MESH
+  gc.meshname = f"{names[0]}_col"
+  gc.group = 3
+  gc.density = 0.0
+  gc.friction = list(fric)
+  gc.solref = list(_OBJ_SOLREF)
+  gc.solimp = list(_OBJ_SOLIMP)
+  gc.condim = 3
+  gc.priority = 0
+  # explicit inertial = first object (overwritten per-world at reset).
+  tm0 = trimesh.load(str(GRAB_MESH_DIR / f"{names[0]}.ply"), force="mesh")
+  tm0.apply_scale(scale)
+  _set_true_inertial(body, tm0, density)
+  return spec
+
+
+def get_grab_multiobj_swap_cfg(
+  names: tuple[str, ...],
+  scale: float = GRAB_SCALE,
+  density: float = DEFAULT_DENSITY,
+  rgba: tuple[float, float, float, float] = (0.85, 0.3, 0.2, 1.0),
+  init_pos: tuple[float, float, float] = (0.0, 0.0, 0.1),
+  friction: float | None = None,
+) -> tuple[EntityCfg, dict]:
+  """Single-body multi-mesh object entity (path-(c) geom_dataid swap) + the
+  per-object physical params table the command writes per-world. Returns
+  (EntityCfg, {name: {rbound, aabb, mass, idiag, com, iquat}})."""
+  for n in names:
+    if not (GRAB_MESH_DIR / f"{n}.ply").exists():
+      raise FileNotFoundError(f"GRAB mesh not found: {GRAB_MESH_DIR / f'{n}.ply'}")
+  params = {n: _obj_phys(n, scale, density) for n in names}
+  cfg = EntityCfg(
+    init_state=EntityCfg.InitialStateCfg(pos=init_pos, rot=(1.0, 0.0, 0.0, 0.0)),
+    spec_fn=partial(_build_swap_spec, tuple(names), scale, density, rgba, friction),
+  )
+  return cfg, params
 
 
 def get_grab_object_cfg(

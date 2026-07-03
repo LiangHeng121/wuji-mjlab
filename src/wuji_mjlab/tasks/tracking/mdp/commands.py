@@ -49,7 +49,10 @@ class HandObjectMotionCommand(CommandTerm):
     # "active" (matches that env's sequence's object) and the others are parked far
     # away (mujoco-warp shares one compiled model across envs, so we can't swap the
     # mesh per env; we put every object in every env and activate one).
-    self.multi_obj = bool(cfg.object_entity_names)
+    # Swap mode (path-(c)): ONE object body whose mesh is swapped per-world via
+    # geom_dataid (replaces the multi-entity + park scheme). Single entity.
+    self.swap = bool(cfg.swap_object_names)
+    self.multi_obj = bool(cfg.object_entity_names) and not self.swap
     if self.multi_obj:
       self.objs: list[Entity] = [env.scene[n] for n in cfg.object_entity_names]
       self.num_objs = len(self.objs)
@@ -131,7 +134,7 @@ class HandObjectMotionCommand(CommandTerm):
 
     # Per-sequence object index (multi-object): which object entity each sequence
     # uses. Single-object -> all zeros.
-    if self.multi_obj:
+    if self.multi_obj or self.swap:
       so = np.asarray(cfg.seq_object_idx, dtype=np.int64)
       if so.shape[0] != self.num_seqs:
         raise ValueError(f"seq_object_idx ({so.shape[0]}) != num_seqs ({self.num_seqs})")
@@ -153,6 +156,9 @@ class HandObjectMotionCommand(CommandTerm):
 
     self.metrics["error_joint_pos"] = torch.zeros(self.num_envs, device=self.device)
     self.metrics["error_obj_pos"] = torch.zeros(self.num_envs, device=self.device)
+
+    if self.swap:
+      self._setup_swap(env)
 
   # -- reference accessors (current frame, per-env) --------------------------
 
@@ -245,6 +251,80 @@ class HandObjectMotionCommand(CommandTerm):
       self.ref_obj_pos - self.obj_pos, dim=-1
     )
 
+  # -- swap mode (path-(c): per-world geom_dataid mesh swap) ------------------
+
+  def _setup_swap(self, env) -> None:
+    """Resolve the single object's geom/body indices + each slot's mesh ids and
+    physical params, expand the per-world model fields, write initial assignment.
+    cfg.swap_object_names[k]=slot k (aligned w/ seq_object_idx); cfg.swap_params
+    [name]={rbound,aabb,mass,idiag,com,iquat} (from get_grab_multiobj_swap_cfg)."""
+    self._sim = env.sim
+    mjm = env.sim.mj_model
+    pre = self.cfg.object_entity_name + "/"  # mjlab attach prefix
+    self._vis_geom = mjm.geom(pre + "obj_visual").id
+    self._col_geom = mjm.geom(pre + "obj_col").id
+    self._obj_body = mjm.body(pre + "obj").id
+    obj_jnt = int(mjm.body(pre + "obj").jntadr[0])  # object free joint
+    self._obj_dofadr = int(mjm.jnt_dofadr[obj_jnt])  # its 6 dofs: dofadr:dofadr+6
+    names = list(self.cfg.swap_object_names)
+    params = self.cfg.swap_params or {}
+    d = self.device
+    keys = ("vmesh", "cmesh", "rb", "aabb", "mass", "idiag", "com", "iquat",
+            "dofw", "bodyw", "subm")
+    col = {k: [] for k in keys}
+    for n in names:
+      col["vmesh"].append(mjm.mesh(pre + f"{n}_visual").id)
+      col["cmesh"].append(mjm.mesh(pre + f"{n}_col").id)
+      p = params[n]
+      col["rb"].append(p["rbound"]); col["aabb"].append(p["aabb"])
+      col["mass"].append(p["mass"]); col["idiag"].append(p["idiag"])
+      col["com"].append(p["com"]); col["iquat"].append(p["iquat"])
+      col["dofw"].append(p["dof_invweight0"]); col["bodyw"].append(p["body_invweight0"])
+      col["subm"].append(p["subtreemass"])
+    self._slot_vis_mesh = torch.tensor(col["vmesh"], dtype=torch.int32, device=d)
+    self._slot_col_mesh = torch.tensor(col["cmesh"], dtype=torch.int32, device=d)
+    self._slot_rbound = torch.tensor(col["rb"], dtype=torch.float32, device=d)
+    self._slot_aabb = torch.tensor(np.stack(col["aabb"]), dtype=torch.float32, device=d)
+    self._slot_mass = torch.tensor(col["mass"], dtype=torch.float32, device=d)
+    self._slot_idiag = torch.tensor(np.stack(col["idiag"]), dtype=torch.float32, device=d)
+    self._slot_com = torch.tensor(np.stack(col["com"]), dtype=torch.float32, device=d)
+    self._slot_iquat = torch.tensor(np.stack(col["iquat"]), dtype=torch.float32, device=d)
+    self._slot_dofw = torch.tensor(np.stack(col["dofw"]), dtype=torch.float32, device=d)
+    self._slot_bodyw = torch.tensor(np.stack(col["bodyw"]), dtype=torch.float32, device=d)
+    self._slot_subm = torch.tensor(col["subm"], dtype=torch.float32, device=d)
+    # Expand only the per-world fields we write. The object is a SEPARATE kinematic
+    # tree (free body) -> block-diagonal mass matrix -> its invweight is independent
+    # of the hand and equals the single-object reference (computed in _obj_phys). So
+    # we write the object's invweight indices DIRECTLY and never call the global
+    # recompute_constants(set_const), which would also recompute the hand's 26-dof
+    # invweight every reset (and churn d.qpos/kinematics) -> hand control unstable.
+    env.sim.expand_model_fields((
+      "geom_dataid", "geom_rbound", "geom_aabb",
+      "body_mass", "body_inertia", "body_ipos", "body_iquat",
+      "body_subtreemass", "body_invweight0", "dof_invweight0",
+    ))
+    all_ids = torch.arange(self.num_envs, device=d)
+    self._write_swap(all_ids, self.env_obj)  # first episode uses env_seq
+
+  def _write_swap(self, env_ids: torch.Tensor, slots: torch.Tensor) -> None:
+    """Write the active object slot's mesh + physical params for env_ids."""
+    m = self._sim.model
+    m.geom_dataid[env_ids, self._vis_geom] = self._slot_vis_mesh[slots]
+    m.geom_dataid[env_ids, self._col_geom] = self._slot_col_mesh[slots]
+    m.geom_rbound[env_ids, self._col_geom] = self._slot_rbound[slots]
+    m.geom_aabb[env_ids, self._col_geom] = self._slot_aabb[slots]
+    m.body_mass[env_ids, self._obj_body] = self._slot_mass[slots]
+    m.body_inertia[env_ids, self._obj_body] = self._slot_idiag[slots]
+    m.body_ipos[env_ids, self._obj_body] = self._slot_com[slots]
+    m.body_iquat[env_ids, self._obj_body] = self._slot_iquat[slots]
+    # Solver invweight for the OBJECT only (precomputed per object); the hand's
+    # invweight stays at its correct compile-time value (never touched). No global
+    # recompute -> hand dofs are not corrupted.
+    da = self._obj_dofadr
+    m.dof_invweight0[env_ids, da:da + 6] = self._slot_dofw[slots]
+    m.body_invweight0[env_ids, self._obj_body] = self._slot_bodyw[slots]
+    m.body_subtreemass[env_ids, self._obj_body] = self._slot_subm[slots]
+
   def _resample_command(self, env_ids: torch.Tensor) -> None:
     # Restart at frame 0 and (multi-seq) draw a fresh sequence for these envs.
     self.time_steps[env_ids] = 0
@@ -270,8 +350,16 @@ class HandObjectMotionCommand(CommandTerm):
     # where not). Zero velocity.
     ref_pos = self._ref_obj_pos[s, t]
     ref_quat = self._ref_obj_quat[s, t]
-    active = self.env_obj[env_ids]  # (n,) which slot is active per reset env
     vel = torch.zeros(len(env_ids), 6, device=self.device)
+    if self.swap:
+      # Single body: write the reference pose, then swap its mesh + physical
+      # params per-world to the active object slot (no park; only one body).
+      self.obj.write_root_state_to_sim(
+        torch.cat([ref_pos, ref_quat, vel], dim=-1), env_ids=env_ids)
+      self.obj.reset(env_ids=env_ids)
+      self._write_swap(env_ids, self.env_obj[env_ids])
+      return
+    active = self.env_obj[env_ids]  # (n,) which slot is active per reset env
     for j, obj in enumerate(self.objs):
       is_active = (active == j).unsqueeze(-1)  # (n,1)
       pos = torch.where(is_active, ref_pos, self._park[j, :3].unsqueeze(0))
@@ -293,6 +381,8 @@ class HandObjectMotionCommandCfg(CommandTermCfg):
   hand_entity_name: str = "robot"
   object_entity_name: str = "object"  # single-object mode
   object_entity_names: tuple[str, ...] = ()  # multi-object: one entity per obj type
+  swap_object_names: tuple[str, ...] = ()  # path-(c) swap: object name per slot
+  swap_params: dict | None = None  # per-object phys (from get_grab_multiobj_swap_cfg)
   seq_object_idx: tuple[int, ...] = ()  # per-seq object slot (aligned w/ motion_files)
   obj_latent_file: str = ""  # obj_type_to_obj_feat.npy (DexTrack w_obj_latent_features)
   contact_file: str = ""  # single-seq contact_grab2/<seq>_contact.npy (B2)

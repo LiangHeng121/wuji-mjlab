@@ -9,20 +9,23 @@ from pathlib import Path
 from mjlab.envs import ManagerBasedRlEnvCfg
 
 from wuji_mjlab.tasks.tracking.config.wuji_hand.robot import get_wuji_fly_hand_cfg
-from wuji_mjlab.tasks.tracking.grab_object_cfg import get_grab_object_cfg
+from wuji_mjlab.tasks.tracking.grab_object_cfg import (
+  get_grab_multiobj_swap_cfg,
+  get_grab_object_cfg,
+)
 from wuji_mjlab.tasks.tracking.tracking_env_cfg import make_tracking_env_cfg
 
 # Single cubesmall reference (FPOS retarget, same data used on the Isaac Gym side).
 _MOTION_FILE = (
-  "/home/liangh/DexTrack/isaacgymenvs/data/GRAB_Tracking_PK_WUJI_FPOS_v1/"
+  "/data/home/liangheng/DexTrack/isaacgymenvs/data/GRAB_Tracking_PK_WUJI_FPOS_v1/"
   "data/wuji_passive_active_info_ori_grab_s2_cubesmall_inspect_1_nf_300.npy"
 )
 _OBJECT_NAME = "cubesmall"  # real GRAB mesh (matches the retargeted reference)
-_OBJ_LATENT_FILE = "/home/liangh/DexTrack/assets/obj_type_to_obj_feat.npy"
+_OBJ_LATENT_FILE = "/data/home/liangheng/DexTrack/assets/obj_type_to_obj_feat.npy"
 _SEQ = "ori_grab_s2_cubesmall_inspect_1"
 # B2 contact guidance data (true-flag + nearest in-slice vertex) for cgsmooth.
 _CONTACT_FILE = (
-  "/home/liangh/DexTrack/isaacgymenvs/data/GRAB_Tracking_PK_WUJI_FPOS_v1/"
+  "/data/home/liangheng/DexTrack/isaacgymenvs/data/GRAB_Tracking_PK_WUJI_FPOS_v1/"
   f"contact_grab2/{_SEQ}_contact.npy"
 )
 
@@ -61,7 +64,7 @@ def wuji_hand_cubesmall_tracking_env_cfg(
 
 # ----- multi-sequence cubesmall generalist (all subjects, exclude offhand) -----
 _DATA_DIR = Path(
-  "/home/liangh/DexTrack/isaacgymenvs/data/GRAB_Tracking_PK_WUJI_FPOS_v1"
+  "/data/home/liangheng/DexTrack/isaacgymenvs/data/GRAB_Tracking_PK_WUJI_FPOS_v1"
 )
 _MOTION_DIR = _DATA_DIR / "data"
 _CONTACT_DIR = _DATA_DIR / "contact_grab2"
@@ -137,6 +140,50 @@ def wuji_hand_cubesmall_multi_tracking_env_cfg(
     object_name="cubesmall", play=play, num_envs=num_envs, action_mode=action_mode,
     obs_mode=obs_mode, scale_rewards_by_dt=scale_rewards_by_dt,
     finger_kp_scale=finger_kp_scale, reward_mode=reward_mode)
+
+
+# ----- 3-object generalist via PATH-(c) per-world geom_dataid SWAP -------------
+def wuji_hand_3obj_swap_tracking_env_cfg(
+  play: bool = False, num_envs: int = 4096,
+  action_mode: str = "wdelta", obs_mode: str = "full",
+  scale_rewards_by_dt: bool = False, finger_kp_scale: float = 1.0,
+  reward_mode: str = "cgsmooth_b2_softclip",
+) -> ManagerBasedRlEnvCfg:
+  """3-object generalist with ONE object body whose mesh is swapped per-world via
+  geom_dataid (cube/cup/apple), instead of 3 bodies + parking 2. Each env has only
+  ONE object body in physics -> single-object contact buffers (no 384/1536), no
+  eval park pollution. Object identity reaches the policy via the per-seq 256-d
+  obj latent (same as the park version). See docs path-(c) PoC."""
+  objs = ["cubesmall", "cup", "apple"]
+  cfg = make_tracking_env_cfg(  # default (single-object) nconmax/njmax
+    num_envs=num_envs, action_mode=action_mode, obs_mode=obs_mode,
+    scale_rewards_by_dt=scale_rewards_by_dt, reward_mode=reward_mode,
+  )
+  swap_entity, swap_params = get_grab_multiobj_swap_cfg(tuple(objs))
+  cfg.scene.entities = {
+    "robot": get_wuji_fly_hand_cfg(finger_kp_scale=finger_kp_scale),
+    "object": swap_entity,
+  }
+  motion, contact, seq_obj = [], [], []
+  for j, o in enumerate(objs):
+    for s in _object_sequences(o):
+      motion.append(str(_MOTION_DIR / f"wuji_passive_active_info_{s}_nf_300.npy"))
+      contact.append(str(_CONTACT_DIR / f"{s}_contact.npy"))
+      seq_obj.append(j)
+  m = cfg.commands["motion"]
+  m.motion_files = tuple(motion)
+  m.swap_object_names = tuple(objs)
+  m.swap_params = swap_params
+  m.seq_object_idx = tuple(seq_obj)
+  m.obj_latent_file = _OBJ_LATENT_FILE
+  if reward_mode.startswith("cgsmooth_b2_softclip"):
+    m.contact_files = tuple(contact)
+  cfg.viewer.body_name = "right_palm_link"
+
+  if play:
+    cfg.scene.num_envs = 4
+    cfg.observations["policy"].enable_corruption = False
+  return cfg
 
 
 # ----- multi-OBJECT generalist: cubesmall + cup + apple together ---------------
