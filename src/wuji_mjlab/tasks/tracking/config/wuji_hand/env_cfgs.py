@@ -63,8 +63,13 @@ def wuji_hand_cubesmall_tracking_env_cfg(
 
 
 # ----- multi-sequence cubesmall generalist (all subjects, exclude offhand) -----
+# Data version selectable via env var (default FPOS = current training data, so
+# existing tasks are byte-identical). Set WUJI_DATA_VER=GRAB_Tracking_PK_WUJI_TOPO_v1
+# to train on the TopoRetarget low-penetration references for A/B comparison.
+import os as _os
+_DATA_VER = _os.environ.get("WUJI_DATA_VER", "GRAB_Tracking_PK_WUJI_FPOS_v1")
 _DATA_DIR = Path(
-  "/data/home/liangheng/DexTrack/isaacgymenvs/data/GRAB_Tracking_PK_WUJI_FPOS_v1"
+  f"/data/home/liangheng/DexTrack/isaacgymenvs/data/{_DATA_VER}"
 )
 _MOTION_DIR = _DATA_DIR / "data"
 _CONTACT_DIR = _DATA_DIR / "contact_grab2"
@@ -100,24 +105,35 @@ def wuji_hand_multi_tracking_env_cfg(
   scale_rewards_by_dt: bool = False, finger_kp_scale: float = 1.0,
   reward_mode: str = "cgsmooth_b2_softclip", extra_exclude: tuple[str, ...] = (),
   only_seq: str | None = None,
+  # ---- apple-ablation switches (all default OFF -> byte-identical behavior) ----
+  r1_ungated_obj_pos: bool = False, r2_bonus_lift_only: bool = False,
+  r3_guide_goal_gate: float | None = None, et_left_behind: bool = False,
+  mass_curriculum: bool = False, mass_cur_total_steps: int = 320_000,
+  rsi_prob: float = 0.0, obj_friction: float | None = None,
 ) -> ManagerBasedRlEnvCfg:
   """Single-object multi-sequence generalist over all sequences of ``object_name``
   (NO offhand). Each env gets a random sequence, resampled on reset. cup is concave
   -> CoACD; apple/cubesmall near-convex -> single hull (handled in grab_object_cfg).
-  only_seq: if set, train on just that ONE sequence (single-trajectory specialist)."""
+  only_seq: if set, train on just that ONE sequence (single-trajectory specialist).
+  Ablation switches (R1/R2/R3/ET/MassCur/RSI/Friction) all default OFF."""
   cfg = make_tracking_env_cfg(
     num_envs=num_envs, action_mode=action_mode, obs_mode=obs_mode,
     scale_rewards_by_dt=scale_rewards_by_dt, reward_mode=reward_mode,
+    r1_ungated_obj_pos=r1_ungated_obj_pos, r2_bonus_lift_only=r2_bonus_lift_only,
+    r3_guide_goal_gate=r3_guide_goal_gate, et_left_behind=et_left_behind,
+    mass_curriculum=mass_curriculum, mass_cur_total_steps=mass_cur_total_steps,
   )
+  obj_kw = {"friction": obj_friction} if obj_friction is not None else {}
   cfg.scene.entities = {
     "robot": get_wuji_fly_hand_cfg(finger_kp_scale=finger_kp_scale),
     "object": get_grab_object_cfg(
-      object_name, convex_hull=(object_name in _CONVEX_HULL_OBJS)),
+      object_name, convex_hull=(object_name in _CONVEX_HULL_OBJS), **obj_kw),
   }
   seqs = [only_seq] if only_seq else _object_sequences(object_name, extra_exclude)
   cfg.commands["motion"].motion_files = tuple(
     str(_MOTION_DIR / f"wuji_passive_active_info_{s}_nf_300.npy") for s in seqs)
   cfg.commands["motion"].obj_latent_file = _OBJ_LATENT_FILE
+  cfg.commands["motion"].rsi_prob = rsi_prob
   if reward_mode.startswith("cgsmooth_b2_softclip"):
     cfg.commands["motion"].contact_files = tuple(
       str(_CONTACT_DIR / f"{s}_contact.npy") for s in seqs)

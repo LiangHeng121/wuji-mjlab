@@ -217,6 +217,8 @@ class PPO:
         mean_value_loss = 0
         mean_surrogate_loss = 0
         mean_entropy = 0
+        # BC/distillation loss (only populated when distill_coef > 0)
+        mean_bc_loss = 0.0
         # RND loss
         mean_rnd_loss = 0 if self.rnd else None
         # Symmetry loss
@@ -316,6 +318,31 @@ class PPO:
 
             loss = surrogate_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy.mean()
 
+            # --- Behavior-cloning / distillation loss (DAgger-style) ---
+            # OFF unless a distill runner injected `teachers` + `teacher_latents`
+            # + a positive `distill_coef`. getattr defaults => an unmodified PPO
+            # (every existing training) never enters this branch: byte-identical.
+            # Teacher actions are recomputed here from the STORED obs (teachers are
+            # frozen & deterministic, so this equals rollout-time DAgger labels),
+            # routed per-sample by the 256-d object latent (last 256 dims of the
+            # concatenated policy obs) to the matching single-object specialist.
+            bc_loss = None
+            distill_coef = getattr(self, "distill_coef", 0.0)
+            teachers = getattr(self, "teachers", None)
+            if distill_coef > 0.0 and teachers:
+                obs_bc = batch.observations[:original_batch_size]  # type: ignore
+                student_mean = self.actor.output_mean[:original_batch_size]
+                with torch.no_grad():
+                    lat = obs_bc["policy"][:, -256:]
+                    tid = torch.cdist(lat, self.teacher_latents).argmin(dim=1)
+                    teacher_mean = torch.zeros_like(student_mean)
+                    for k, teach in enumerate(teachers):
+                        m = tid == k
+                        if bool(m.any()):
+                            teacher_mean[m] = teach(obs_bc[m])
+                bc_loss = (student_mean - teacher_mean).pow(2).mean()
+                loss = loss + distill_coef * bc_loss
+
             # Symmetry loss
             if self.symmetry:
                 # Obtain the symmetric actions
@@ -392,6 +419,9 @@ class PPO:
             # Symmetry loss
             if mean_symmetry_loss is not None:
                 mean_symmetry_loss += symmetry_loss.item()
+            # BC/distillation loss
+            if bc_loss is not None:
+                mean_bc_loss += bc_loss.item()
 
         # Divide the losses by the number of updates
         num_updates = self.num_learning_epochs * self.num_mini_batches
@@ -423,6 +453,8 @@ class PPO:
             loss_dict["rnd"] = mean_rnd_loss
         if self.symmetry:
             loss_dict["symmetry"] = mean_symmetry_loss
+        if getattr(self, "distill_coef", 0.0) > 0.0:
+            loss_dict["bc"] = mean_bc_loss / num_updates
 
         return loss_dict
 

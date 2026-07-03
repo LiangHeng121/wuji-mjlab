@@ -13,6 +13,7 @@ from __future__ import annotations
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.managers.action_manager import ActionTermCfg
 from mjlab.managers.command_manager import CommandTermCfg
+from mjlab.managers.event_manager import EventTermCfg
 from mjlab.managers.observation_manager import (
   ObservationGroupCfg,
   ObservationTermCfg,
@@ -34,6 +35,13 @@ def make_tracking_env_cfg(
   num_envs: int = 4096, action_mode: str = "offset", obs_mode: str = "full",
   scale_rewards_by_dt: bool = False, reward_mode: str = "pinall3",
   nconmax: int = 96, njmax: int = 512,
+  # ---- apple-ablation switches (all default OFF -> byte-identical behavior) ----
+  r1_ungated_obj_pos: bool = False,   # R1: object_pos penalty always on
+  r2_bonus_lift_only: bool = False,   # R2: in-place bonus only in lift phase
+  r3_guide_goal_gate: float | None = None,  # R3: contact_guide gated on goal_dist
+  et_left_behind: bool = False,       # ET: terminate when object left behind
+  mass_curriculum: bool = False,      # MassCur: anneal object mass 0.3->1.0x
+  mass_cur_total_steps: int = 320_000,
 ) -> ManagerBasedRlEnvCfg:
   """Create the base hand+object tracking config.
 
@@ -185,13 +193,13 @@ def make_tracking_env_cfg(
       func=mdp.object_pos_tracking,
       weight=1.0,
       params={"command_name": "motion", "grip_thres": grip, "n_finger_sum": n_sum,
-              "grasp_mode": grasp_mode},
+              "grasp_mode": grasp_mode, "ungated": r1_ungated_obj_pos},
     ),
     "object_inplace_bonus": RewardTermCfg(  # in-place bonus, gated by grasp
       func=mdp.object_inplace_bonus,
       weight=1.0,
       params={"command_name": "motion", "grip_thres": grip, "n_finger_sum": n_sum,
-              "grasp_mode": grasp_mode},
+              "grasp_mode": grasp_mode, "lift_phase_only": r2_bonus_lift_only},
     ),
   }
 
@@ -212,7 +220,8 @@ def make_tracking_env_cfg(
   if reward_mode == "cgsmooth_b2_softclip":  # B2 contact + action-rate + soft-limit
     rewards["contact_guide"] = RewardTermCfg(  # CONTACT_COEF=1.0, CONTACT_BETA=8
       func=mdp.contact_guide, weight=1.0,
-      params={"command_name": "motion", "beta": 8.0},
+      params={"command_name": "motion", "beta": 8.0,
+              "goal_gate": r3_guide_goal_gate},
     )
     rewards["action_rate"] = RewardTermCfg(  # ACTION_RATE_COEF=0.0005
       func=mdp.action_rate_l2, weight=0.0005, params={"command_name": "motion"},
@@ -233,6 +242,23 @@ def make_tracking_env_cfg(
       func=mdp.object_unstable, params={"command_name": "motion"}
     ),
   }
+  if et_left_behind:  # ET ablation: cut floor-hover income by ending the episode
+    terminations["object_left_behind"] = TerminationTermCfg(
+      func=mdp.object_left_behind,
+      params={"command_name": "motion", "z_gap": 0.10, "hold_steps": 15},
+    )
+
+  ##
+  # Events (MassCur ablation only; default {} = no events)
+  ##
+
+  events: dict[str, EventTermCfg] = {}
+  if mass_curriculum:
+    events["object_mass_curriculum"] = EventTermCfg(
+      func=mdp.object_mass_curriculum, mode="reset",
+      params={"start_scale": 0.3, "end_frac": 0.6,
+              "total_steps": mass_cur_total_steps, "entity_name": "object"},
+    )
 
   ##
   # Assemble
@@ -247,7 +273,7 @@ def make_tracking_env_cfg(
     observations=observations,
     actions=actions,
     commands=commands,
-    events={},
+    events=events,
     rewards=rewards,
     terminations=terminations,
     viewer=ViewerConfig(

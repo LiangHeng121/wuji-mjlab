@@ -140,21 +140,36 @@ def _grasp_gate(env, command_name, flag, grasp_mode, min_contacts):
 
 def object_pos_tracking(
   env, command_name: str = "motion", grip_thres: float = 0.22, n_finger_sum: int = 5,
-  grasp_mode: str = "distance", min_contacts: int = 2,
+  grasp_mode: str = "distance", min_contacts: int = 2, ungated: bool = False,
 ) -> torch.Tensor:
-  """-2*goal_dist, only when grasping."""
+  """-2*goal_dist, only when grasping.
+
+  ungated=True (ablation R1, default OFF): the penalty applies ALWAYS -- releasing
+  the object no longer zeroes the tracking penalty (closes the 'let go and follow
+  the reference empty-handed for free' escape hatch). Bonus stays gated."""
   _, _, flag, goal_dist = _grasp_geometry(env, command_name, grip_thres, n_finger_sum)
+  if ungated:
+    return -2.0 * goal_dist
   gate = _grasp_gate(env, command_name, flag, grasp_mode, min_contacts)
   return torch.where(gate, -2.0 * goal_dist, torch.zeros_like(goal_dist))
 
 
 def object_inplace_bonus(
   env, command_name: str = "motion", grip_thres: float = 0.22, n_finger_sum: int = 5,
-  grasp_mode: str = "distance", min_contacts: int = 2,
+  grasp_mode: str = "distance", min_contacts: int = 2, lift_phase_only: bool = False,
 ) -> torch.Tensor:
-  """+1/(1+10*goal_dist) if goal_dist<=0.05 and grasping."""
+  """+1/(1+10*goal_dist) if goal_dist<=0.05 and grasping.
+
+  lift_phase_only=True (ablation R2, default OFF): additionally require the
+  CURRENT reference object z to be >3 cm above that sequence's frame-0 reference z
+  -- no bonus for touching the object while it (and the reference) sit on the
+  floor (kills the floor-phase bonus farming)."""
   _, _, flag, goal_dist = _grasp_geometry(env, command_name, grip_thres, n_finger_sum)
   gate = _grasp_gate(env, command_name, flag, grasp_mode, min_contacts)
+  if lift_phase_only:
+    cmd = env.command_manager.get_term(command_name)
+    base_z = cmd._ref_obj_pos[cmd.env_seq, 0, 2]  # per-seq frame-0 reference z
+    gate = gate & (cmd.ref_obj_pos[:, 2] > base_z + 0.03)
   b = torch.where(
     goal_dist <= 0.05, 1.0 / (1.0 + 10.0 * goal_dist), torch.zeros_like(goal_dist)
   )
@@ -219,7 +234,10 @@ def fair_reward_metric(env, command_name: str = "motion") -> torch.Tensor:
 # ----- cgsmooth_b2_softclip patches (on top of pinall3) ---------------------
 
 
-def contact_guide(env, command_name: str = "motion", beta: float = 8.0) -> torch.Tensor:
+def contact_guide(
+  env, command_name: str = "motion", beta: float = 8.0,
+  goal_gate: float | None = None,
+) -> torch.Tensor:
   """B2 contact guidance: +mean over contact fingers of exp(-beta*d), where d is
   the sim fingertip -> reference contact point (object-local point transformed by
   the LIVE object pose). Gated per finger by the true contact flag. weight=CONTACT_COEF.
@@ -237,7 +255,14 @@ def contact_guide(env, command_name: str = "motion", beta: float = 8.0) -> torch
   v = torch.exp(-beta * d)
   cg = (flag * v).sum(dim=-1)
   fs = flag.sum(dim=-1)
-  return cg / (fs + 1e-6)
+  cg = cg / (fs + 1e-6)
+  if goal_gate is not None:
+    # Ablation R3 (default OFF): guidance only pays while the object actually
+    # tracks the reference -- once the object is left behind (goal_dist > gate)
+    # the hover income stops.
+    goal_dist = torch.norm(cmd.ref_obj_pos - obj_pos, p=2, dim=-1)
+    cg = torch.where(goal_dist <= goal_gate, cg, torch.zeros_like(cg))
+  return cg
 
 
 def soft_joint_limit(env, command_name: str = "motion") -> torch.Tensor:

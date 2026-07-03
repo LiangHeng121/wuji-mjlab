@@ -181,6 +181,43 @@ register_mjlab_task(
   runner_cls=WujiOnPolicyRunner,
 )
 
+# ----- apple from-scratch ABLATION FAMILY (all default-off switches; baseline =
+# apple contact specialist 0/8). Each toggles ONE mechanism to test why apple
+# won't lift (escape hatch / floor-farming / exploration deadlock / mass). All
+# apple, kp x1, cgsmooth_b2_softclip_contact, launched at 8000 env externally.
+_AP_BASE = dict(object_name="apple", reward_mode="cgsmooth_b2_softclip_contact")
+_AP_ABLATIONS = {
+  "R1": dict(r1_ungated_obj_pos=True),
+  "R2": dict(r2_bonus_lift_only=True),
+  "R3": dict(r3_guide_goal_gate=0.10),
+  "R123": dict(r1_ungated_obj_pos=True, r2_bonus_lift_only=True,
+               r3_guide_goal_gate=0.10),
+  "MassCur": dict(mass_curriculum=True),
+  "RSI": dict(rsi_prob=0.5),
+  "ET": dict(et_left_behind=True),
+  "Friction": dict(obj_friction=1.0),
+  # Noise handled below (ppo init_std, not an env switch).
+}
+for _x, _kw in _AP_ABLATIONS.items():
+  register_mjlab_task(
+    task_id=f"WujiHand_Tracking_AppleMulti_CGSmooth_Contact_{_x}",
+    env_cfg=wuji_hand_multi_tracking_env_cfg(num_envs=4096, **_AP_BASE, **_kw),
+    play_env_cfg=wuji_hand_multi_tracking_env_cfg(play=True, **_AP_BASE, **_kw),
+    rl_cfg=wuji_hand_tracking_ppo_runner_cfg(
+      run_name=f"Tracking_AppleMulti_CGSmooth_Contact_{_x}", max_iterations=10000),
+    runner_cls=WujiOnPolicyRunner,
+  )
+# Noise: exploration-only variant (init_std 0.5->0.8), env identical to baseline.
+register_mjlab_task(
+  task_id="WujiHand_Tracking_AppleMulti_CGSmooth_Contact_Noise",
+  env_cfg=wuji_hand_multi_tracking_env_cfg(num_envs=4096, **_AP_BASE),
+  play_env_cfg=wuji_hand_multi_tracking_env_cfg(play=True, **_AP_BASE),
+  rl_cfg=wuji_hand_tracking_ppo_runner_cfg(
+    run_name="Tracking_AppleMulti_CGSmooth_Contact_Noise",
+    max_iterations=10000, init_std=0.8),
+  runner_cls=WujiOnPolicyRunner,
+)
+
 # ----- single-sequence specialists (contact-gated, kp x1): cup + apple lift -----
 for _oid, _obj, _seq in (
   ("Cup", "cup", "ori_grab_s8_cup_lift"),
@@ -233,4 +270,27 @@ register_mjlab_task(
   rl_cfg=wuji_hand_tracking_ppo_runner_cfg(
     run_name="Tracking_3Obj_CGSmooth_Contact_Swap", max_iterations=10000),
   runner_cls=WujiOnPolicyRunner,
+)
+
+# ----- specialist->generalist online (DAgger) distillation -------------------
+# Scalable architecture: N single-object sim instances + one shared student (NOT
+# multi-object-in-one-sim; park/swap don't scale). The registered env_cfg builds
+# ONE single-object env (cubesmall); DistillRunner builds the rest (cup, apple),
+# stitches them into a MultiVecEnv, loads the 3 frozen specialists, and adds a BC
+# loss to PPO (WUJI_DISTILL_COEF, default 1.0; =0 -> pure multi-instance PPO
+# generalist = scalable successor to park 3obj). Teachers routed per-sample by the
+# 256-d object latent. See rl/distill_runner.py + rl/multi_vecenv.py.
+from wuji_mjlab.rl.distill_runner import DistillRunner  # noqa: E402
+
+register_mjlab_task(
+  task_id="WujiHand_Tracking_Distill_3obj",
+  env_cfg=wuji_hand_multi_tracking_env_cfg(
+    object_name="cubesmall", num_envs=4096,
+    reward_mode="cgsmooth_b2_softclip_contact"),
+  play_env_cfg=wuji_hand_multi_tracking_env_cfg(
+    object_name="cubesmall", play=True,
+    reward_mode="cgsmooth_b2_softclip_contact"),
+  rl_cfg=wuji_hand_tracking_ppo_runner_cfg(
+    run_name="Tracking_Distill_3obj", max_iterations=10000),
+  runner_cls=DistillRunner,
 )

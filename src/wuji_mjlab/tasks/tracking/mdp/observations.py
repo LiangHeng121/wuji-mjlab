@@ -40,6 +40,25 @@ def object_unstable(
          | (p.abs() > max_pos).any(-1) | (v.abs() > max_vel).any(-1))
   return bad
 
+
+def object_left_behind(
+  env, command_name: str = "motion", z_gap: float = 0.10, hold_steps: int = 15,
+) -> torch.Tensor:
+  """ET ablation termination (only registered in the _ET task, default absent):
+  terminate when the reference object z is > z_gap above the actual object for
+  hold_steps consecutive steps -- the object was clearly left behind, so the
+  'hover and farm hand-tracking shaping for the rest of the episode' income
+  stream is cut (DeepMimic-style early termination). Returns (E,) bool."""
+  cmd = env.command_manager.get_term(command_name)
+  gap = (cmd.ref_obj_pos[:, 2] - cmd.obj_pos[:, 2]) > z_gap
+  cnt = getattr(env, "_left_behind_cnt", None)
+  if cnt is None or cnt.shape[0] != env.num_envs:
+    cnt = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
+  cnt = torch.where(gap, cnt + 1, torch.zeros_like(cnt))
+  cnt[env.episode_length_buf < 2] = 0  # fresh resets start clean
+  env._left_behind_cnt = cnt
+  return cnt >= hold_steps
+
 # --- simple obs (the successful baseline) ---------------------------------
 
 

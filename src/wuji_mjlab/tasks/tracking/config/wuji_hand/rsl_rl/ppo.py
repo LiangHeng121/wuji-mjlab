@@ -12,6 +12,7 @@ from mjlab.rl import (
 def wuji_hand_tracking_ppo_runner_cfg(
   run_name: str = "Tracking",
   max_iterations: int = 10000,
+  init_std: float = 0.5,  # Noise ablation raises this (0.5->0.8) for more exploration
 ) -> RslRlOnPolicyRunnerCfg:
   # Aligned to DexTrack wuji (HumanoidPPOSupervised.yaml + multi script): net v4,
   # lr 5e-4 adaptive (kl 0.008), horizon 32, mini_epochs 5, critic_coef 4,
@@ -26,7 +27,7 @@ def wuji_hand_tracking_ppo_runner_cfg(
       obs_normalization=True,
       distribution_cfg={
         "class_name": "SoftplusGaussianDistribution",
-        "init_std": 0.5,
+        "init_std": init_std,
         "min_std": 0.2,
       },
     ),

@@ -328,6 +328,17 @@ class HandObjectMotionCommand(CommandTerm):
   def _resample_command(self, env_ids: torch.Tensor) -> None:
     # Restart at frame 0 and (multi-seq) draw a fresh sequence for these envs.
     self.time_steps[env_ids] = 0
+    if self.cfg.rsi_prob > 0.0:
+      # RSI (Reference State Initialization, default OFF): with prob rsi_prob start
+      # from a random mid-trajectory frame -- hand+object are teleported to the
+      # reference at that frame below (the existing s,t placement code), so the
+      # policy gets to experience held/lifted states it could never reach by
+      # exploration from frame 0 (DeepMimic-style bootstrap).
+      n = len(env_ids)
+      tmax = max(int(self.cfg.rsi_max_frac * (self.time_step_total - 1)), 1)
+      rand_t = torch.randint(0, tmax, (n,), device=self.device)
+      use = torch.rand(n, device=self.device) < self.cfg.rsi_prob
+      self.time_steps[env_ids] = torch.where(use, rand_t, torch.zeros_like(rand_t))
     if self.num_seqs > 1:
       self.env_seq[env_ids] = torch.randint(
         0, self.num_seqs, (len(env_ids),), device=self.device, dtype=torch.long
@@ -387,6 +398,10 @@ class HandObjectMotionCommandCfg(CommandTermCfg):
   obj_latent_file: str = ""  # obj_type_to_obj_feat.npy (DexTrack w_obj_latent_features)
   contact_file: str = ""  # single-seq contact_grab2/<seq>_contact.npy (B2)
   contact_files: tuple[str, ...] = ()  # multi-seq contact, aligned 1:1 with motion_files
+  # RSI ablation (default OFF): prob of starting an episode at a random reference
+  # frame in [0, rsi_max_frac*T) instead of frame 0 (hand+object teleported there).
+  rsi_prob: float = 0.0
+  rsi_max_frac: float = 0.8
 
   def build(self, env) -> HandObjectMotionCommand:
     return HandObjectMotionCommand(self, env)
