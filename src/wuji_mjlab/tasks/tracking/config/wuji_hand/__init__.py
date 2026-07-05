@@ -282,6 +282,11 @@ register_mjlab_task(
 # 256-d object latent. See rl/distill_runner.py + rl/multi_vecenv.py.
 from wuji_mjlab.rl.distill_runner import DistillRunner  # noqa: E402
 
+# MassCur (WUJI_MASS_CUR=1) is applied APPLE-ONLY, in distill_runner: only the apple
+# sub-env gets the mass-anneal curriculum. The base env here is cubesmall (already
+# lifts fine, no curriculum) so it never gets it. Keeps the new-vs-old comparison
+# attributable to the apple curriculum alone.
+
 register_mjlab_task(
   task_id="WujiHand_Tracking_Distill_3obj",
   env_cfg=wuji_hand_multi_tracking_env_cfg(

@@ -40,7 +40,10 @@ _OBJECTS = ("cubesmall", "cup", "apple")
 _TEACHER_GLOBS = {
   "cubesmall": "logs/rsl_rl/wuji_tracking/*CubesmallMulti_CGSmooth_Contact*/model_*.pt",
   "cup": "logs/rsl_rl/wuji_tracking/*CupMulti_CGSmooth_Contact*/model_*.pt",
-  "apple": "logs/rsl_rl/wuji_tracking/*AppleMulti_CGSmooth_Contact_Env8000*/model_*.pt",
+  # apple teacher = the MassCur specialist (3/8 lift), NOT the standard AppleMulti
+  # specialist (0/8). The 0/8 teacher's BC loss would fight MassCur's lifting; the
+  # 3/8 teacher reinforces it. _latest_ckpt picks the highest-iter MassCur ckpt.
+  "apple": "logs/rsl_rl/wuji_tracking/*AppleMulti_CGSmooth_Contact_MassCur_Env8000*/model_*.pt",
 }
 _REWARD_MODE = "cgsmooth_b2_softclip_contact"
 
@@ -64,11 +67,16 @@ class DistillRunner(WujiOnPolicyRunner):
     # to rebuild each teacher runner below.
     pristine_cfg = copy.deepcopy(train_cfg)
 
-    # Build the remaining single-object envs on the same device.
+    # Build the remaining single-object envs on the same device. MassCur
+    # (WUJI_MASS_CUR=1) is applied APPLE-ONLY: only the apple sub-env anneals its
+    # mass, so the new-vs-old comparison is attributable to the apple curriculum
+    # alone (cube/cup already lift fine and are left untouched).
+    mass_cur = os.environ.get("WUJI_MASS_CUR") == "1"
     sub_envs = [env]
     for obj in _OBJECTS[1:]:
       cfg = wuji_hand_multi_tracking_env_cfg(
-        object_name=obj, num_envs=num_envs, reward_mode=_REWARD_MODE)
+        object_name=obj, num_envs=num_envs, reward_mode=_REWARD_MODE,
+        mass_curriculum=(mass_cur and obj == "apple"))
       cfg.scene.num_envs = num_envs
       base = ManagerBasedRlEnv(cfg=cfg, device=device)
       sub_envs.append(RslRlVecEnvWrapper(base, clip_actions=env.clip_actions))

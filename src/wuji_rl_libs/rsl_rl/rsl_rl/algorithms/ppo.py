@@ -503,6 +503,14 @@ class PPO:
             self.critic.load_state_dict(loaded_dict["critic_state_dict"], strict=strict)
         if load_cfg.get("optimizer"):
             self.optimizer.load_state_dict(loaded_dict["optimizer_state_dict"])
+            # Adaptive-schedule resume fix: self.learning_rate is NOT in the
+            # checkpoint, so __init__ leaves it at the INITIAL lr. The adaptive
+            # schedule overwrites optimizer.param_groups[*]["lr"] with
+            # self.learning_rate on the first update, which would snap a converged
+            # low lr back up to the initial (e.g. 8e-5 -> 5e-4), destabilizing the
+            # policy and tanking reward. Sync it to the loaded optimizer's lr (the
+            # converged value) so training continues from where it left off.
+            self.learning_rate = self.optimizer.param_groups[0]["lr"]
         if load_cfg.get("rnd") and self.rnd:
             self.rnd.load_state_dict(loaded_dict["rnd_state_dict"], strict=strict)
             self.rnd_optimizer.load_state_dict(loaded_dict["rnd_optimizer_state_dict"])

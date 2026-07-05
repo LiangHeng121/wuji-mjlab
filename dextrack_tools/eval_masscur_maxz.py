@@ -10,7 +10,7 @@ to the FPOS baseline. cwd = wuji-mjlab. Run on an idle GPU (cuda:0 via CVD).
 """
 from __future__ import annotations
 import os
-os.environ["WUJI_DATA_VER"] = "GRAB_Tracking_PK_WUJI_TOPO_v1"  # MUST be before import
+os.environ["WUJI_DATA_VER"] = "GRAB_Tracking_PK_WUJI_FPOS_v1"  # MUST be before import
 
 import types
 from dataclasses import asdict
@@ -25,8 +25,8 @@ from wuji_mjlab.utils.task_cfg_utils import prepare_task_cfgs
 
 CK = "logs/rsl_rl/wuji_tracking"
 RUNS = [
-  ("apple_topo", "WujiHand_Tracking_AppleMulti_CGSmooth_Contact",
-   f"{CK}/2026-07-03_14-52-08_Apple_TOPO_Env8000/model_9999.pt", False),
+  ("masscur", "WujiHand_Tracking_AppleMulti_CGSmooth_Contact",
+   "logs/rsl_rl/wuji_tracking/2026-07-04_02-01-03_Tracking_AppleMulti_CGSmooth_Contact_MassCur_Env8000/model_3250.pt", False),
 ]
 APPLE_LIFT = [f"ori_grab_s{i}_apple_lift" for i in (1, 2, 3, 4, 6, 7, 8, 9)]
 
@@ -75,11 +75,11 @@ for label, task, ckpt, is_3obj in RUNS:
   del env, base, r
   torch.cuda.empty_cache()
 
-print("\n===== apple-lift max_z  TOPO data  (✓ = max_z >= ref_peak - 0.05) =====")
+print("\n===== apple-lift max_z  MassCur@3250 nominal-mass  FPOS  (✓ = max_z >= ref_peak - 0.05) =====")
 print(f"{'sequence':<22}{'apple_topo':>16}{'ref_peak':>10}")
 for nm in APPLE_LIFT:
-  mz, rp, ok = results[("apple_topo", nm)]
+  mz, rp, ok = results[("masscur", nm)]
   print(f"{nm:<22}{mz:>12.3f} {'✓' if ok else '·':>3}{rp:>10.3f}")
-n = sum(1 for nm in APPLE_LIFT if results[("apple_topo", nm)][2])
+n = sum(1 for nm in APPLE_LIFT if results[("masscur", nm)][2])
 print("-" * 48)
 print(f"{'n/8 lifted (FPOS baseline=0/8)':<22}{str(n) + '/8':>16}")

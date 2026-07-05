@@ -140,7 +140,19 @@ def _run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
   runner.add_git_repo_to_log(__file__)
   if resume_path is not None:
     print(f"[INFO]: Loading model checkpoint from: {resume_path}")
-    runner.load(str(resume_path))
+    loaded_infos = runner.load(str(resume_path))
+    # Restore the env step counter so step-keyed curricula (e.g. MassCur mass
+    # anneal, which reads env.common_step_counter) continue from the resumed
+    # iteration instead of restarting at step 0 (which restarts the curriculum).
+    # The checkpoint saves it under infos["env_state"]; prefer that exact value,
+    # else reconstruct as iters * num_steps_per_env. Guarded on env support.
+    base_env = getattr(env, "unwrapped", env)
+    if hasattr(base_env, "common_step_counter"):
+      saved = (loaded_infos or {}).get("env_state", {}).get("common_step_counter")
+      if saved is None:
+        saved = runner.current_learning_iteration * int(agent_cfg["num_steps_per_env"])
+      base_env.common_step_counter = int(saved)
+      print(f"[INFO]: Restored common_step_counter -> {base_env.common_step_counter}")
 
   runner.learn(
     num_learning_iterations=cfg.agent.max_iterations, init_at_random_ep_len=True
