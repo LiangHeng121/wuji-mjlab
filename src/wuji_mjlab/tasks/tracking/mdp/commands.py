@@ -110,7 +110,13 @@ class HandObjectMotionCommand(CommandTerm):
     self.num_seqs = len(qs)
     self.time_step_total = int(qs[0].shape[0])
 
-    self._ref_qpos = torch.tensor(np.stack(qs), device=self.device)  # (S,T,J)
+    # Reference hinge angles come from retargeting as RAW values that jump by 2*pi
+    # when a joint crosses the +/-pi seam (esp. the base WRJ0r{x,y,z} on rotation-
+    # heavy motions: drink/pour/eat). The position actuator then sees a full-turn
+    # target error -> huge torque -> the whole hand+object explode. Unwrap along
+    # time so every joint target is continuous. No-op for joints that never cross
+    # the seam (fingers, base slides). Fixes BOTH training and eval.
+    self._ref_qpos = torch.tensor(np.unwrap(np.stack(qs), axis=1), device=self.device)  # (S,T,J)
     self._ref_obj_pos = torch.tensor(np.stack(ops), device=self.device)  # (S,T,3)
     self._ref_obj_quat = torch.tensor(np.stack(oqs), device=self.device)  # (S,T,4)
     self._ref_tip_pos = torch.tensor(np.stack(tps), device=self.device)  # (S,T,5,3)
