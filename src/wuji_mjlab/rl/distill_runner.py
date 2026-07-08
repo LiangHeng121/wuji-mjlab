@@ -36,7 +36,8 @@ from wuji_mjlab.tasks.tracking.config.wuji_hand.env_cfgs import (
 
 # Distill config: object order == teacher order. First object is env #0 (built by
 # the train script); the rest are built here. Teacher ckpts glob-resolved (latest).
-_OBJECTS = ("cubesmall", "cup", "apple")
+_OBJECTS = ("cubesmall", "cup", "duck", "elephant", "mouse", "phone", "train",
+            "alarmclock", "flute")  # 9obj TOPO scale-up (no apple); coef0 pure PPO
 _TEACHER_GLOBS = {
   "cubesmall": "logs/rsl_rl/wuji_tracking/*CubesmallMulti_CGSmooth_Contact*/model_*.pt",
   "cup": "logs/rsl_rl/wuji_tracking/*CupMulti_CGSmooth_Contact*/model_*.pt",
@@ -90,25 +91,29 @@ class DistillRunner(WujiOnPolicyRunner):
     distill_coef = float(os.environ.get("WUJI_DISTILL_COEF", "1.0"))
     teachers = []
     latents = []
-    for k, obj in enumerate(_OBJECTS):
-      ckpt = _latest_ckpt(_TEACHER_GLOBS[obj])
-      # Build a throwaway runner on this object's sub-env to load the teacher policy.
-      tcfg = copy.deepcopy(pristine_cfg)
-      # MjlabOnPolicyRunner (not raw OnPolicyRunner) so it strips None cnn_cfg/
-      # distribution_cfg from the cfg before MLPModel construction.
-      tmp = MjlabOnPolicyRunner(sub_envs[k], tcfg, None, device)
-      tmp.load(ckpt, load_cfg={"actor": True}, strict=True, map_location=device)
-      pol = tmp.get_inference_policy(device=device)
-      for p in pol.parameters():
-        p.requires_grad_(False)
-      teachers.append(pol)
-      # Object latent (constant per single-object env): last 256 dims are the latent.
-      cmd = sub_envs[k].unwrapped.command_manager.get_term("motion")
-      latents.append(cmd.obj_latent[0].detach().clone())
-      print(f"[distill] teacher[{k}] {obj} <- {ckpt}")
+    # coef0 = pure PPO: BC loss is off, so teachers are never used. Skip loading
+    # them entirely -- lets us scale to objects that have NO specialist teacher
+    # (_TEACHER_GLOBS/_latest_ckpt would otherwise crash on a missing ckpt).
+    if distill_coef > 0.0:
+      for k, obj in enumerate(_OBJECTS):
+        ckpt = _latest_ckpt(_TEACHER_GLOBS[obj])
+        # Build a throwaway runner on this object's sub-env to load the teacher policy.
+        tcfg = copy.deepcopy(pristine_cfg)
+        # MjlabOnPolicyRunner (not raw OnPolicyRunner) so it strips None cnn_cfg/
+        # distribution_cfg from the cfg before MLPModel construction.
+        tmp = MjlabOnPolicyRunner(sub_envs[k], tcfg, None, device)
+        tmp.load(ckpt, load_cfg={"actor": True}, strict=True, map_location=device)
+        pol = tmp.get_inference_policy(device=device)
+        for p in pol.parameters():
+          p.requires_grad_(False)
+        teachers.append(pol)
+        # Object latent (constant per single-object env): last 256 dims are the latent.
+        cmd = sub_envs[k].unwrapped.command_manager.get_term("motion")
+        latents.append(cmd.obj_latent[0].detach().clone())
+        print(f"[distill] teacher[{k}] {obj} <- {ckpt}")
 
     self.alg.teachers = teachers
-    self.alg.teacher_latents = torch.stack(latents).to(device)  # (N,256)
+    self.alg.teacher_latents = torch.stack(latents).to(device) if latents else None
     self.alg.distill_coef = distill_coef
     print(f"[distill] distill_coef={distill_coef}  num_envs/obj={num_envs}  "
           f"objects={_OBJECTS}")
