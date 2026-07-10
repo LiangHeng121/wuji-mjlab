@@ -94,7 +94,10 @@ def _object_sequences(obj: str, extra_exclude: tuple[str, ...] = ()) -> list[str
   seqs = []
   for p in sorted(_MOTION_DIR.glob(f"wuji_passive_active_info_*_{obj}_*_nf_300.npy")):
     seq = p.name.replace("wuji_passive_active_info_", "").replace("_nf_300.npy", "")
-    if ("offhand" in seq or any(x in seq for x in _UNDERGROUND_SEQS)
+    # WUJI_KEEP_UNDERGROUND=1 保留穿地板序列(仅用于与早期含它们的 run 做公平对照训练;
+    # eval 不设此变量 -> 仍排除)。默认排除。
+    _keep_ug = _os.environ.get("WUJI_KEEP_UNDERGROUND") == "1"
+    if ("offhand" in seq or (not _keep_ug and any(x in seq for x in _UNDERGROUND_SEQS))
         or any(x in seq for x in extra_exclude)):
       continue
     if not (_CONTACT_DIR / f"{seq}_contact.npy").exists():
