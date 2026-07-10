@@ -78,14 +78,24 @@ _CONTACT_DIR = _DATA_DIR / "contact_grab2"
 # -> object velocity explodes to 1e4+ -> NaN (cup reproduced; apple near-convex too).
 _CONVEX_HULL_OBJS = {"cup", "apple"}
 
+# Reference OBJECT dips BELOW the floor (object_transl z < 0): GRAB "pass"-to-below-
+# table-surface motions. Our scene is a floor-only plane at z=0 (no table), so that
+# region is solid -> the object can't reach the reference -> guaranteed failure.
+# NOT a TopoRetarget artifact (same z in FPOS); NOT fixable by a param (would need
+# table geometry). Excluded from BOTH training and eval. (5 seqs in the 9obj set.)
+_UNDERGROUND_SEQS = ("s1_duck_pass_1", "s4_duck_pass_1", "s5_elephant_pass_1",
+                     "s6_phone_pass_1", "s4_mouse_use_2")
+
 
 def _object_sequences(obj: str, extra_exclude: tuple[str, ...] = ()) -> list[str]:
   """All seq names for GRAB object ``obj`` with motion+contact data, excluding
-  'offhand' (+ any extra_exclude substrings, e.g. 'cup_pass' per the multiobj doc)."""
+  'offhand', physically-unreachable underground seqs (+ any extra_exclude
+  substrings, e.g. 'cup_pass' per the multiobj doc)."""
   seqs = []
   for p in sorted(_MOTION_DIR.glob(f"wuji_passive_active_info_*_{obj}_*_nf_300.npy")):
     seq = p.name.replace("wuji_passive_active_info_", "").replace("_nf_300.npy", "")
-    if "offhand" in seq or any(x in seq for x in extra_exclude):
+    if ("offhand" in seq or any(x in seq for x in _UNDERGROUND_SEQS)
+        or any(x in seq for x in extra_exclude)):
       continue
     if not (_CONTACT_DIR / f"{seq}_contact.npy").exists():
       continue  # need contact for cgsmooth; keep the set consistent across configs
