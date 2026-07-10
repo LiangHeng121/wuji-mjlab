@@ -150,8 +150,12 @@ register_mjlab_task(
   runner_cls=WujiOnPolicyRunner,
 )
 
-# ----- contact-gated cgsmooth_b2_softclip, single-object: cubesmall + apple -----
-for _oid, _obj in (("Cubesmall", "cubesmall"), ("Apple", "apple")):
+# ----- contact-gated cgsmooth_b2_softclip, single-object: cubesmall + apple +
+# 9obj TOPO scale-up objects (for per-object eval of the 9obj generalist) -----
+for _oid, _obj in (("Cubesmall", "cubesmall"), ("Apple", "apple"),
+                   ("Duck", "duck"), ("Elephant", "elephant"), ("Mouse", "mouse"),
+                   ("Phone", "phone"), ("Train", "train"), ("Alarmclock", "alarmclock"),
+                   ("Flute", "flute")):
   register_mjlab_task(
     task_id=f"WujiHand_Tracking_{_oid}Multi_CGSmooth_Contact",
     env_cfg=wuji_hand_multi_tracking_env_cfg(

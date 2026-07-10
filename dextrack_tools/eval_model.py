@@ -21,7 +21,14 @@ EXCLUDE = {"ori_grab_s8_cubesmall_pass_1", "ori_grab_s4_cup_drink_2", "ori_grab_
 POS_TH, MIN_C, LIFT_RATIO, FLY_MARGIN = 0.05, 2, 0.5, 0.30
 ALL_OBJS = [("cube", "WujiHand_Tracking_CubesmallMulti_CGSmooth_Contact", "cubesmall"),
         ("cup", "WujiHand_Tracking_CupMulti_CGSmooth_Contact", "cup"),
-        ("apple", "WujiHand_Tracking_AppleMulti_CGSmooth_Contact", "apple")]
+        ("apple", "WujiHand_Tracking_AppleMulti_CGSmooth_Contact", "apple"),
+        ("duck", "WujiHand_Tracking_DuckMulti_CGSmooth_Contact", "duck"),
+        ("elephant", "WujiHand_Tracking_ElephantMulti_CGSmooth_Contact", "elephant"),
+        ("mouse", "WujiHand_Tracking_MouseMulti_CGSmooth_Contact", "mouse"),
+        ("phone", "WujiHand_Tracking_PhoneMulti_CGSmooth_Contact", "phone"),
+        ("train", "WujiHand_Tracking_TrainMulti_CGSmooth_Contact", "train"),
+        ("alarmclock", "WujiHand_Tracking_AlarmclockMulti_CGSmooth_Contact", "alarmclock"),
+        ("flute", "WujiHand_Tracking_FluteMulti_CGSmooth_Contact", "flute")]
 OBJS = [o for o in ALL_OBJS if o[0] in OBJS_ARG]
 CKPT = CKPT_ARG
 
