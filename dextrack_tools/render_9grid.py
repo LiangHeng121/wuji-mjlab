@@ -14,8 +14,7 @@ from wuji_mjlab.tasks.tracking.config.wuji_hand.env_cfgs import _object_sequence
 from wuji_mjlab.tasks.tracking.mdp.rewards import n_finger_contacts
 from wuji_mjlab.utils.task_cfg_utils import prepare_task_cfgs
 
-CKPT = sorted(glob.glob("logs/rsl_rl/wuji_tracking/*Gen9obj_coef0_TOPO_Env2700/model_*.pt"),
-              key=lambda x: int(x.split("_")[-1][:-3]))[-1]
+CKPT = "logs/rsl_rl/wuji_tracking/2026-07-07_14-20-00_Gen9obj_coef0_TOPO_Env2700/model_5250.pt"  # pinned
 OBJS = [("cube", "WujiHand_Tracking_CubesmallMulti_CGSmooth_Contact", "cubesmall"),
         ("cup", "WujiHand_Tracking_CupMulti_CGSmooth_Contact", "cup"),
         ("duck", "WujiHand_Tracking_DuckMulti_CGSmooth_Contact", "duck"),

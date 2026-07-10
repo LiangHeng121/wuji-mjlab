@@ -15,7 +15,7 @@ from wuji_mjlab.utils.task_cfg_utils import prepare_task_cfgs
 import sys
 CKPT_ARG, DATA_VER_ARG, LABEL_ARG = sys.argv[1], sys.argv[2], sys.argv[3]
 OBJS_ARG = sys.argv[4].split(",") if len(sys.argv)>4 else ["cube","cup","apple"]
-FRAC_TH = 0.90
+FRAC_TH = float(os.environ.get("WUJI_FRAC", "0.90"))
 # range-bug 6条(±π wrap / 平移限位)已由 commands.py unwrap + MJCF放宽修复, 重训模型上
 # 可达(9obj实测4/5成功, cup_s4_drink_2 是正常失败非bug), 不再排除。
 # 穿地板5条由 _object_sequences._UNDERGROUND_SEQS 处理(物理不可达)。故 EXCLUDE 置空。

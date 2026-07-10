@@ -25,12 +25,10 @@ TASKS = {"cubesmall": "WujiHand_Tracking_CubesmallMulti_CGSmooth_Contact",
          "train": "WujiHand_Tracking_TrainMulti_CGSmooth_Contact",
          "alarmclock": "WujiHand_Tracking_AlarmclockMulti_CGSmooth_Contact",
          "flute": "WujiHand_Tracking_FluteMulti_CGSmooth_Contact"}
-CKPT = sorted(glob.glob("logs/rsl_rl/wuji_tracking/*Gen9obj_coef0_TOPO_Env2700/model_*.pt"),
-              key=lambda x: int(x.split("_")[-1][:-3]))[-1]
-POS_TH, FRAC_TH, MIN_C = 0.05, 0.90, 2
+CKPT = "logs/rsl_rl/wuji_tracking/2026-07-07_14-20-00_Gen9obj_coef0_TOPO_Env2700/model_5250.pt"  # pinned
+POS_TH, FRAC_TH, MIN_C = 0.05, float(os.environ.get("WUJI_FRAC", "0.90")), 2
 LIFT_RATIO, FLY_MARGIN = 0.5, 0.30
-EXCLUDE = {"ori_grab_s8_cubesmall_pass_1", "ori_grab_s4_cup_drink_2", "ori_grab_s8_cup_drink_1",
-           "ori_grab_s4_cup_pour_1", "ori_grab_s7_cup_pour_1", "ori_grab_s2_apple_eat_1"}
+EXCLUDE = set()  # range-bug已修复计入; 穿地板由_object_sequences排除
 W, H = 320, 240
 task = TASKS[OBJ]; seqs = [s for s in _object_sequences(OBJ) if s not in EXCLUDE]; N = len(seqs)
 OUTDIR = "/data/home/liangheng/DexTrack/videos/0709"; os.makedirs(OUTDIR, exist_ok=True)
