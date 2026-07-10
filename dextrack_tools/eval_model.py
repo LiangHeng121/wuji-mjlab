@@ -16,11 +16,10 @@ import sys
 CKPT_ARG, DATA_VER_ARG, LABEL_ARG = sys.argv[1], sys.argv[2], sys.argv[3]
 OBJS_ARG = sys.argv[4].split(",") if len(sys.argv)>4 else ["cube","cup","apple"]
 FRAC_TH = 0.90
-EXCLUDE = {"ori_grab_s8_cubesmall_pass_1", "ori_grab_s4_cup_drink_2", "ori_grab_s8_cup_drink_1",
-           "ori_grab_s4_cup_pour_1", "ori_grab_s7_cup_pour_1", "ori_grab_s2_apple_eat_1",
-           # 参考物体穿到地板下(z<0, 物理不可达; GRAB原始数据的桌下pass动作, 非TopoRetarget引入)
-           "ori_grab_s1_duck_pass_1", "ori_grab_s4_duck_pass_1", "ori_grab_s5_elephant_pass_1",
-           "ori_grab_s6_phone_pass_1", "ori_grab_s4_mouse_use_2"}
+# range-bug 6条(±π wrap / 平移限位)已由 commands.py unwrap + MJCF放宽修复, 重训模型上
+# 可达(9obj实测4/5成功, cup_s4_drink_2 是正常失败非bug), 不再排除。
+# 穿地板5条由 _object_sequences._UNDERGROUND_SEQS 处理(物理不可达)。故 EXCLUDE 置空。
+EXCLUDE = set()
 POS_TH, MIN_C, LIFT_RATIO, FLY_MARGIN = 0.05, 2, 0.5, 0.30
 ALL_OBJS = [("cube", "WujiHand_Tracking_CubesmallMulti_CGSmooth_Contact", "cubesmall"),
         ("cup", "WujiHand_Tracking_CupMulti_CGSmooth_Contact", "cup"),
